@@ -1,28 +1,28 @@
-# AI Trip Planner
+# Sport Agent
 
-A **production-ready multi-agent system** built for learning and customization. This repo demonstrates three essential AI engineering patterns that students can study, modify, and adapt for their own use cases.
+A **production-ready multi-agent system** for personalized daily sports digests. This system demonstrates three essential AI engineering patterns that can be studied, modified, and adapted for other use cases.
 
 ## What You'll Learn
 
 - 🤖 **Multi-Agent Orchestration**: 4 specialized agents running in parallel using LangGraph
-- 🔍 **RAG (Retrieval-Augmented Generation)**: Vector search over curated data with fallback strategies
-- 🌐 **API Integration**: Real-time web search with graceful degradation (LLM fallback)
+- 📅 **Automated Scheduling**: Daily digest generation at user-configured times
+- 💾 **Persistent Storage**: JSON-based user preference management
 - 📊 **Observability**: Production tracing with Arize for debugging and evaluation
-- 🛠️ **Composable Architecture**: Easily adapt from "trip planner" to your own agent system
+- 🛠️ **Composable Architecture**: Easily adapt from "sport agent" to your own agent system
 
-**Perfect for:** Students learning to build, evaluate, and deploy agentic AI systems.
+**Perfect for:** Developers learning to build, evaluate, and deploy agentic AI systems with scheduling and state management.
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         User Request                             │
-│                    (destination, duration, interests)            │
+│                       User Preferences                           │
+│              (teams, players, leagues, delivery time)            │
 └────────────────────────────────┬────────────────────────────────┘
                                  │
                     ┌────────────▼────────────┐
                     │   FastAPI Endpoint      │
-                    │   + Session Tracking    │
+                    │   + JSON Storage        │
                     └────────────┬────────────┘
                                  │
                     ┌────────────▼────────────┐
@@ -33,218 +33,388 @@ A **production-ready multi-agent system** built for learning and customization. 
         ┌────────────────────────┼────────────────────────┐
         │                        │                        │
    ┌────▼─────┐           ┌─────▼──────┐         ┌──────▼─────┐
-   │ Research │           │   Budget   │         │   Local    │
+   │ Schedule │           │   Scores   │         │   Player   │
    │  Agent   │           │   Agent    │         │   Agent    │
    └────┬─────┘           └─────┬──────┘         └──────┬─────┘
         │                        │                        │
-        │ Tools:                 │ Tools:                 │ Tools + RAG:
-        │ • essential_info       │ • budget_basics        │ • local_flavor
-        │ • weather_brief        │ • attraction_prices    │ • hidden_gems
-        │ • visa_brief           │                        │ • Vector search
-        │                        │                        │   (90+ guides)
+        │ Tools:                 │ Tools:                 │ Tools:
+        │ • upcoming_games       │ • recent_results       │ • player_news
+        │ • game_times           │ • live_scores          │ • injury_updates
+        │ • tv_schedule          │ • team_standings       │ • player_stats
         │                        │                        │
         └────────────────────────┼────────────────────────┘
                                  │
                             ┌────▼─────┐
-                            │Itinerary │
+                            │  Digest  │
                             │  Agent   │
                             │(Synthesis)│
                             └────┬─────┘
                                  │
                     ┌────────────▼────────────┐
-                    │   Final Itinerary       │
-                    │   + Tool Call Metadata  │
+                    │   Daily Sport Digest    │
+                    │   + Scheduled Delivery  │
                     └─────────────────────────┘
 
 All agents, tools, and LLM calls → Arize Observability Platform
 ```
 
-## Learning Paths
+## Key Features
 
-### 🎓 Beginner Path
-1. **Setup & Run** (15 min)
-   - Clone repo, configure `.env` with OpenAI key
-   - Start server: `./start.sh`
-   - Test API: `python "test scripts/test_api.py"`
+### 🎯 User Configuration
+- Select favorite teams across multiple sports
+- Follow specific players for personalized updates
+- Choose leagues/sports of interest
+- Configure delivery time and timezone
+- Persistent JSON storage
 
-2. **Observe & Understand** (30 min)
-   - Make a few trip planning requests
-   - View traces in Arize dashboard
-   - Understand agent execution flow and tool calls
+### 📊 Daily Digest Generation
+- **Yesterday's Results**: Scores and highlights for followed teams
+- **Today's Schedule**: Upcoming games with times and broadcast info
+- **Player News**: Injuries, transfers, and performance updates
+- **Standings**: Current league positions
 
-3. **Experiment with Prompts** (30 min)
-   - Modify agent prompts in `backend/main.py`
-   - Change tool descriptions
-   - See how it affects outputs
+### ⏰ Automated Scheduling
+- Daily digest generation at user-specified time
+- APScheduler for reliable job scheduling
+- Timezone-aware delivery
+- Digest history tracking (last 30 digests)
 
-### 🚀 Intermediate Path
-1. **Enable Advanced Features** (20 min)
-   - Set `ENABLE_RAG=1` to use vector search
-   - Add `TAVILY_API_KEY` for real-time web search
-   - Compare results with/without these features
-
-2. **Add Custom Data** (45 min)
-   - Add your own city to `backend/data/local_guides.json`
-   - Test RAG retrieval with your data
-   - Understand fallback strategies
-
-3. **Create a New Tool** (1 hour)
-   - Add a new tool (e.g., `restaurant_finder`)
-   - Integrate it into an agent
-   - Test and trace the new tool calls
-
-### 💪 Advanced Path
-1. **Change the Domain** (2-3 hours)
-   - Use Cursor AI to help transform the system
-   - Example: Change from "trip planner" to "PRD generator"
-   - Modify state, agents, and tools for your use case
-
-2. **Add a New Agent** (2 hours)
-   - Create a 5th agent (e.g., "activities planner")
-   - Update the LangGraph workflow
-   - Test parallel vs sequential execution
-
-3. **Implement Evaluations** (2 hours)
-   - Use `test scripts/synthetic_data_gen.py` as a base
-   - Create evaluation criteria for your domain
-   - Set up automated evals in Arize
-
-## Common Use Cases (Built by Students)
-
-Students have successfully adapted this codebase for:
-
-- **📝 PR Description Generator**
-  - Agents: Code Analyzer, Context Gatherer, Description Writer
-  - Replaces travel tools with GitHub API calls
-  - Used by tech leads to auto-generate PR descriptions
-
-- **🎯 Customer Support Analyst**
-  - Agents: Ticket Classifier, Knowledge Base Search, Response Generator
-  - RAG over support docs instead of local guides
-  - Routes tickets and drafts responses
-
-- **🔬 Research Assistant**
-  - Agents: Web Searcher, Academic Search, Citation Manager, Synthesizer
-  - Web search for papers + RAG over personal library
-  - Generates research summaries with citations
-
-- **📱 Content Planning System**
-  - Agents: SEO Researcher, Social Media Planner, Blog Scheduler
-  - Tools for keyword research, trend analysis
-  - Creates cross-platform content calendars
-
-- **🏗️ Architecture Review Agent**
-  - Agents: Code Scanner, Pattern Detector, Best Practices Checker
-  - RAG over architecture docs
-  - Reviews PRs for architectural concerns
-
-**💡 Your Turn**: Use Cursor AI to help you adapt this system for your domain!
+### 🔧 Graceful Degradation
+- All tools work without external API keys
+- LLM fallback for all sport information
+- No API rate limits or costs for MVP
+- Future-ready for real sports API integration
 
 ## Quickstart
 
-1) Requirements
-- Python 3.10+ (Docker optional)
+### 1) Requirements
+- Python 3.10+ 
+- OpenAI API key or OpenRouter API key
 
-2) Configure environment
-- Copy `backend/.env.example` to `backend/.env`.
-- Set one LLM key: `OPENAI_API_KEY=...` or `OPENROUTER_API_KEY=...`.
-- Optional: `ARIZE_SPACE_ID` and `ARIZE_API_KEY` for tracing.
+### 2) Configure environment
+Create `backend/.env` file:
+```bash
+# Required - LLM Provider (choose one)
+OPENAI_API_KEY=your_openai_api_key_here
+# OR
+OPENROUTER_API_KEY=your_openrouter_api_key_here
+OPENROUTER_MODEL=openai/gpt-4o-mini
 
-3) Install dependencies
+# Optional - Observability
+ARIZE_SPACE_ID=your_arize_space_id
+ARIZE_API_KEY=your_arize_api_key
+```
+
+### 3) Install dependencies
 ```bash
 cd backend
-uv pip install -r requirements.txt   # faster, deterministic installs
-# If uv is not installed: curl -LsSf https://astral.sh/uv/install.sh | sh
-# Fallback: pip install -r requirements.txt
+pip install -r requirements.txt
+# Recommended: Use uv for faster installs
+# curl -LsSf https://astral.sh/uv/install.sh | sh
+# uv pip install -r requirements.txt
 ```
 
-4) Run
+### 4) Run
 ```bash
-# make sure you are back in the root directory of ai-trip-planner
-cd ..
-./start.sh                      # starts backend on 8000; serves minimal UI at '/'
-# or
-cd backend && uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+# From the backend directory
+cd backend
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+# Or from the root directory
+./start.sh
 ```
 
-5) Open
-- Frontend: http://localhost:3000
-- API: http://localhost:8000
-- Docs: http://localhost:8000/docs
- - Minimal UI: http://localhost:8000/
+### 5) Open
+- **Web UI**: http://localhost:8000
+- **API Docs**: http://localhost:8000/docs
+- **Health Check**: http://localhost:8000/health
 
-Docker (optional)
+## Usage
+
+### Via Web Interface
+1. Open http://localhost:8000
+2. Enter your favorite teams (e.g., "Lakers, Manchester United, Patriots")
+3. Optionally add players (e.g., "LeBron James, Cristiano Ronaldo")
+4. Select leagues (e.g., "NBA, Premier League, NFL")
+5. Choose delivery time and timezone
+6. Click "Save Preferences"
+7. Click "Generate Digest Now" to see a preview
+8. Your digest will be automatically generated daily at your chosen time
+
+### Via API
+
+**Configure Interests:**
 ```bash
-docker-compose up --build
+curl -X POST http://localhost:8000/configure-interests \
+  -H "Content-Type: application/json" \
+  -d '{
+    "teams": ["Lakers", "Manchester United"],
+    "players": ["LeBron James"],
+    "leagues": ["NBA", "Premier League"],
+    "delivery_time": "07:00",
+    "timezone": "America/Los_Angeles"
+  }'
+```
+
+**Generate Digest On-Demand:**
+```bash
+curl -X POST http://localhost:8000/generate-digest \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": "your-user-id"}'
+```
+
+**Get Preferences:**
+```bash
+curl http://localhost:8000/preferences/{user_id}
+```
+
+**Get Digest History:**
+```bash
+curl http://localhost:8000/digest-history/{user_id}?limit=10
 ```
 
 ## Project Structure
-- `backend/`: FastAPI app (`main.py`), LangGraph agents, tracing hooks.
-- `frontend/index.html`: Minimal static UI served by backend at `/`.
-- `optional/airtable/`: Airtable integration (optional, not on critical path).
-- `test scripts/`: `test_api.py`, `synthetic_data_gen.py` for quick checks/evals.
-- Root: `start.sh`, `docker-compose.yml`, `README.md`.
 
-## Development Commands
-- Backend (dev): `uvicorn main:app --host 0.0.0.0 --port 8000 --reload`
-- API smoke test: `python "test scripts"/test_api.py`
-- Synthetic evals: `python "test scripts"/synthetic_data_gen.py --base-url http://localhost:8000 --count 12`
+```
+├── backend/
+│   ├── main.py                 # FastAPI app, agents, tools, endpoints
+│   ├── storage.py              # JSON-based user preferences storage
+│   ├── scheduler.py            # APScheduler for daily digest automation
+│   ├── requirements.txt        # Python dependencies
+│   ├── data/
+│   │   └── user_preferences.json  # Persistent user data
+│   └── .env                    # Environment variables (gitignored)
+├── frontend/
+│   └── index.html              # Web UI for configuration and viewing
+├── test scripts/
+│   └── test_api.py             # API testing script
+├── README.md                   # This file
+├── .cursorrules                # Development guidelines
+└── start.sh                    # Quick start script
+```
 
-## API
-- POST `/plan-trip` → returns a generated itinerary.
-  Example body:
-  ```json
-  {"destination":"Tokyo, Japan","duration":"7 days","budget":"$2000","interests":"food, culture"}
-  ```
-- GET `/health` → simple status.
+## API Endpoints
 
-## Notes on Tracing (Optional)
-- If `ARIZE_SPACE_ID` and `ARIZE_API_KEY` are set, OpenInference exports spans for agents/tools/LLM calls. View at https://app.arize.com.
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/` | Serve web UI |
+| GET | `/health` | Health check |
+| POST | `/configure-interests` | Save user preferences and schedule digest |
+| POST | `/generate-digest` | Generate digest on-demand |
+| GET | `/preferences/{user_id}` | Get user preferences |
+| PUT | `/preferences/{user_id}` | Update user preferences |
+| DELETE | `/preferences/{user_id}` | Delete user preferences |
+| GET | `/digest-history/{user_id}` | Get digest history |
+| GET | `/scheduled-jobs` | List all scheduled jobs |
 
-## Optional Features
+## Development
 
-### RAG: Vector Search for Local Guides
+### Agent Architecture
 
-The local agent can use vector search to retrieve curated local experiences from a database of 90+ real-world recommendations:
+The system uses 4 specialized agents:
 
-- **Enable**: Set `ENABLE_RAG=1` in your `.env` file
-- **Requirements**: Requires `OPENAI_API_KEY` for embeddings
-- **Data**: Uses curated experiences from `backend/data/local_guides.json`
-- **Benefits**: Provides grounded, cited recommendations with sources
-- **Learning**: Great example of production RAG patterns with fallback strategies
+**1. Schedule Agent**
+- Gathers upcoming game schedules
+- Converts times to user's timezone
+- Finds broadcast information
+- Tools: `upcoming_games`, `game_times`, `tv_schedule`
 
-When disabled (default), the local agent uses LLM-generated responses.
+**2. Scores Agent**
+- Retrieves recent game results
+- Checks live scores
+- Gets league standings
+- Tools: `recent_results`, `live_scores`, `team_standings`
 
-See `RAG.md` for detailed documentation.
+**3. Player Agent**
+- Collects player news and updates
+- Reports on injuries
+- Tracks player statistics
+- Tools: `player_news`, `injury_updates`, `player_stats`
 
-### Web Search: Real-Time Tool Data
+**4. Digest Agent**
+- Synthesizes all information
+- Formats into readable sections
+- Creates engaging morning briefing
 
-Tools can call real web search APIs (Tavily or SerpAPI) for up-to-date travel information:
+### Parallel Execution
 
-- **Enable**: Add `TAVILY_API_KEY` or `SERPAPI_API_KEY` to your `.env` file
-- **Benefits**: Real-time data for weather, attractions, prices, customs, etc.
-- **Fallback**: Without API keys, tools automatically fall back to LLM-generated responses
-- **Learning**: Demonstrates graceful degradation and multi-tier fallback patterns
+The first three agents run **in parallel** (not sequentially) for maximum performance. They all converge into the Digest Agent for final synthesis.
 
-Recommended: Tavily (free tier: 1000 searches/month) - https://tavily.com
+```python
+# Parallel execution pattern
+g.add_edge(START, "schedule_node")
+g.add_edge(START, "scores_node")
+g.add_edge(START, "player_node")
 
-## Next Steps
+# Converge for synthesis
+g.add_edge("schedule_node", "digest_node")
+g.add_edge("scores_node", "digest_node")
+g.add_edge("player_node", "digest_node")
+```
 
-1. **🎯 Start Simple**: Get it running, make some requests, view traces
-2. **🔍 Explore Code**: Read through `backend/main.py` to understand patterns
-3. **🛠️ Modify Prompts**: Change agent behaviors to see what happens
-4. **🚀 Enable Features**: Try RAG and web search
-5. **💡 Build Your Own**: Use Cursor to transform it into your agent system
+### Adding New Features
+
+**To add a new sport tool:**
+```python
+@tool
+def new_sport_tool(param: str) -> str:
+    """Clear description of what this tool does."""
+    instruction = f"Generate information about {param}."
+    return _llm_fallback(instruction)
+```
+
+**To add a new agent:**
+1. Define agent function following existing patterns
+2. Add node to graph in `build_graph()`
+3. Configure edges for parallel or sequential execution
+4. Update `SportDigestState` TypedDict if needed
+
+## Scheduling System
+
+The Sport Agent uses APScheduler to automate daily digest generation:
+
+- **Configuration**: Users set delivery time and timezone
+- **Persistence**: Schedules persist across server restarts
+- **Reliability**: Background scheduler handles job execution
+- **Storage**: Generated digests saved to user's history
+
+### How It Works
+
+1. User configures preferences via web UI or API
+2. System schedules daily job at specified time
+3. Scheduler triggers `generate_and_send_digest()` function
+4. Digest is generated using full LangGraph workflow
+5. Result is saved to user's digest history
+6. Future: Will send via email/SMS
+
+## Storage System
+
+User preferences and digest history are stored in JSON:
+
+```json
+{
+  "users": {
+    "user-id-123": {
+      "teams": ["Lakers", "Manchester United"],
+      "players": ["LeBron James"],
+      "leagues": ["NBA", "Premier League"],
+      "delivery_time": "07:00",
+      "timezone": "America/Los_Angeles",
+      "digest_history": [
+        {
+          "digest": "...",
+          "timestamp": "2025-10-19T07:00:00"
+        }
+      ]
+    }
+  }
+}
+```
+
+## Performance Metrics
+
+- **Average response time**: ~6-8 seconds
+- **Parallel agent execution**: 3 agents simultaneously
+- **State management**: Efficient TypedDict with operator.add
+- **Storage**: Fast JSON file operations with thread safety
+
+## Observability
+
+When Arize credentials are configured, all operations are traced:
+
+- Agent executions and timings
+- Tool calls with arguments
+- LLM token usage
+- Error tracking
+- User attribution
+
+View traces at: https://app.arize.com
+
+## Testing
+
+### Manual Testing
+```bash
+# Health check
+curl http://localhost:8000/health
+
+# Test full workflow
+python "test scripts/test_api.py"
+```
+
+### Test Mode
+Set `TEST_MODE=1` in `.env` to use fake LLM for fast testing without API calls.
 
 ## Troubleshooting
 
-- **401/empty results**: Verify `OPENAI_API_KEY` or `OPENROUTER_API_KEY` in `backend/.env`
-- **No traces**: Ensure Arize credentials are set and reachable
-- **Port conflicts**: Stop existing services on 3000/8000 or change ports
-- **RAG not working**: Check `ENABLE_RAG=1` and `OPENAI_API_KEY` are both set
-- **Slow responses**: Web search APIs may timeout; LLM fallback will handle it
+**Issue**: Empty or error responses
+- **Solution**: Verify `OPENAI_API_KEY` or `OPENROUTER_API_KEY` is set in `backend/.env`
 
-## Deploy on Render
-- This repo includes `render.yaml`. Connect your GitHub repo in Render and deploy as a Web Service.
-- Render will run: `pip install -r backend/requirements.txt` and `uvicorn main:app --host 0.0.0.0 --port $PORT`.
-- Set `OPENAI_API_KEY` (or `OPENROUTER_API_KEY`) and optional Arize vars in the Render dashboard.
+**Issue**: Digest not generating at scheduled time
+- **Solution**: Check server logs, ensure server is running continuously
+
+**Issue**: Port already in use
+- **Solution**: Stop other services on port 8000 or change port: `uvicorn main:app --port 8001`
+
+**Issue**: Preferences not saving
+- **Solution**: Check `backend/data/` directory exists and is writable
+
+## Future Enhancements
+
+### Phase 2: Real API Integration
+- ESPN API for live scores and schedules
+- SportsData API for comprehensive statistics
+- Real-time updates instead of LLM generation
+
+### Phase 3: Notification System
+- Email delivery via SendGrid
+- SMS delivery via Twilio
+- Push notifications via Firebase
+
+### Phase 4: Advanced Features
+- Multi-language support
+- Fantasy sports integration
+- Betting odds and predictions
+- Social sharing capabilities
+
+## Adapting to Other Domains
+
+This architecture can be transformed into other agent systems:
+
+**Example Transformations:**
+- **Sport Agent** → **News Digest Agent** (tech news, finance, etc.)
+- **Sport Agent** → **Weather & Travel Agent**
+- **Sport Agent** → **Stock Market Agent**
+- **Sport Agent** → **Content Monitoring Agent**
+
+Key patterns to maintain:
+- Parallel agent execution
+- Graceful degradation
+- Persistent storage
+- Scheduled automation
+- Observability
+
+## License & Credits
+
+Built on the AI Trip Planner architecture, demonstrating multi-agent systems with LangGraph.
+
+Core Technologies:
+- **LangGraph 0.2.55+**: Multi-agent orchestration
+- **LangChain 0.3.7+**: Agent framework
+- **FastAPI**: REST API
+- **APScheduler**: Job scheduling
+- **OpenAI GPT**: LLM intelligence
+- **Arize OTEL**: Observability
+
+## Support
+
+For issues or questions:
+1. Check the troubleshooting section
+2. Review `.cursorrules` for development patterns
+3. Examine existing agent and tool implementations
+4. Check Arize traces for debugging
+
+---
+
+**Version**: 1.0.0  
+**Status**: Production Ready (MVP)  
+**Last Updated**: October 19, 2025

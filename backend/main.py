@@ -4,7 +4,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import os
-import time
+import uuid
 import json
 from datetime import datetime
 from pathlib import Path
@@ -47,28 +47,30 @@ from typing_extensions import TypedDict, Annotated
 import operator
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.tools import tool
-from langchain_core.documents import Document
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain_community.vectorstores import InMemoryVectorStore
-import httpx
+from langchain_openai import ChatOpenAI
+
+# Storage and Scheduling
+from storage import load_preferences, save_preferences, list_all_users, delete_preferences, save_digest_history, get_digest_history
+from scheduler import start_scheduler, stop_scheduler, schedule_daily_digest, unschedule_digest, get_scheduled_jobs
 
 
-class TripRequest(BaseModel):
-    destination: str
-    duration: str
-    budget: Optional[str] = None
-    interests: Optional[str] = None
-    travel_style: Optional[str] = None
-    # Optional fields for enhanced session tracking and observability
-    user_input: Optional[str] = None
-    session_id: Optional[str] = None
+class SportPreferencesRequest(BaseModel):
+    teams: List[str]
+    players: Optional[List[str]] = []
+    leagues: List[str]
+    delivery_time: str = "07:00"
+    timezone: str = "America/Los_Angeles"
     user_id: Optional[str] = None
-    turn_index: Optional[int] = None
 
 
-class TripResponse(BaseModel):
-    result: str
+class DigestResponse(BaseModel):
+    digest: str
+    generated_at: str
     tool_calls: List[Dict[str, Any]] = []
+
+
+class DigestRequest(BaseModel):
+    user_id: str
 
 
 def _init_llm():
@@ -80,7 +82,7 @@ def _init_llm():
             return self
         def invoke(self, messages):
             class _Msg:
-                content = "Test itinerary"
+                content = "Test sport digest"
                 tool_calls: List[Dict[str, Any]] = []
             return _Msg()
 
@@ -104,171 +106,7 @@ def _init_llm():
 llm = _init_llm()
 
 
-# Feature flag for optional RAG demo (opt-in for learning)
-ENABLE_RAG = os.getenv("ENABLE_RAG", "0").lower() not in {"0", "false", "no"}
-
-
-# RAG helper: Load curated local guides as LangChain documents
-def _load_local_documents(path: Path) -> List[Document]:
-    """Load local guides JSON and convert to LangChain Documents."""
-    if not path.exists():
-        return []
-    try:
-        raw = json.loads(path.read_text())
-    except Exception:
-        return []
-
-    docs: List[Document] = []
-    for row in raw:
-        description = row.get("description")
-        city = row.get("city")
-        if not description or not city:
-            continue
-        interests = row.get("interests", []) or []
-        metadata = {
-            "city": city,
-            "interests": interests,
-            "source": row.get("source"),
-        }
-        # Prefix city + interests in content so embeddings capture location context
-        interest_text = ", ".join(interests) if interests else "general travel"
-        content = f"City: {city}\nInterests: {interest_text}\nGuide: {description}"
-        docs.append(Document(page_content=content, metadata=metadata))
-    return docs
-
-
-class LocalGuideRetriever:
-    """Retrieves curated local experiences using vector similarity search.
-    
-    This class demonstrates production RAG patterns for students:
-    - Vector embeddings for semantic search
-    - Fallback to keyword matching when embeddings unavailable
-    - Graceful degradation with feature flags
-    """
-    
-    def __init__(self, data_path: Path):
-        """Initialize retriever with local guides data.
-        
-        Args:
-            data_path: Path to local_guides.json file
-        """
-        self._docs = _load_local_documents(data_path)
-        self._embeddings: Optional[OpenAIEmbeddings] = None
-        self._vectorstore: Optional[InMemoryVectorStore] = None
-        
-        # Only create embeddings when RAG is enabled and we have an API key
-        if ENABLE_RAG and self._docs and not os.getenv("TEST_MODE"):
-            try:
-                model = os.getenv("OPENAI_EMBED_MODEL", "text-embedding-3-small")
-                self._embeddings = OpenAIEmbeddings(model=model)
-                store = InMemoryVectorStore(embedding=self._embeddings)
-                store.add_documents(self._docs)
-                self._vectorstore = store
-            except Exception:
-                # Gracefully degrade to keyword search if embeddings fail
-                self._embeddings = None
-                self._vectorstore = None
-
-    @property
-    def is_empty(self) -> bool:
-        """Check if any documents were loaded."""
-        return not self._docs
-
-    def retrieve(self, destination: str, interests: Optional[str], *, k: int = 3) -> List[Dict[str, Any]]:
-        """Retrieve top-k relevant local guides for a destination.
-        
-        Args:
-            destination: City or destination name
-            interests: Comma-separated interests (e.g., "food, art")
-            k: Number of results to return
-            
-        Returns:
-            List of dicts with 'content', 'metadata', and 'score' keys
-        """
-        if not ENABLE_RAG or self.is_empty:
-            return []
-
-        # Use vector search if available, otherwise fall back to keywords
-        if not self._vectorstore:
-            return self._keyword_fallback(destination, interests, k=k)
-
-        query = destination
-        if interests:
-            query = f"{destination} with interests {interests}"
-        
-        try:
-            # LangChain retriever ensures embeddings + searches are traced
-            retriever = self._vectorstore.as_retriever(search_kwargs={"k": max(k, 4)})
-            docs = retriever.invoke(query)
-        except Exception:
-            return self._keyword_fallback(destination, interests, k=k)
-
-        # Format results with metadata and scores
-        top_docs = docs[:k]
-        results = []
-        for doc in top_docs:
-            score_val: float = 0.0
-            if isinstance(doc.metadata, dict):
-                maybe_score = doc.metadata.get("score")
-                if isinstance(maybe_score, (int, float)):
-                    score_val = float(maybe_score)
-            results.append({
-                "content": doc.page_content,
-                "metadata": doc.metadata,
-                "score": score_val,
-            })
-
-        if not results:
-            return self._keyword_fallback(destination, interests, k=k)
-        return results
-
-    def _keyword_fallback(self, destination: str, interests: Optional[str], *, k: int) -> List[Dict[str, Any]]:
-        """Simple keyword-based retrieval when embeddings unavailable.
-        
-        This demonstrates graceful degradation for students learning about
-        fallback strategies in production systems.
-        """
-        dest_lower = destination.lower()
-        interest_terms = [part.strip().lower() for part in (interests or "").split(",") if part.strip()]
-
-        def _score(doc: Document) -> int:
-            score = 0
-            city_match = doc.metadata.get("city", "").lower()
-            # Match city name
-            if dest_lower and dest_lower.split(",")[0] in city_match:
-                score += 2
-            # Match interests
-            for term in interest_terms:
-                if term and term in " ".join(doc.metadata.get("interests") or []).lower():
-                    score += 1
-                if term and term in doc.page_content.lower():
-                    score += 1
-            return score
-
-        scored_docs = [(_score(doc), doc) for doc in self._docs]
-        scored_docs.sort(key=lambda item: item[0], reverse=True)
-        top_docs = scored_docs[:k]
-        
-        results = []
-        for score, doc in top_docs:
-            if score > 0:
-                results.append({
-                    "content": doc.page_content,
-                    "metadata": doc.metadata,
-                    "score": float(score),
-                })
-        return results
-
-
-# Initialize retriever at module level (loads data once at startup)
-_DATA_DIR = Path(__file__).parent / "data"
-GUIDE_RETRIEVER = LocalGuideRetriever(_DATA_DIR / "local_guides.json")
-
-
-# Search API configuration and helpers
-SEARCH_TIMEOUT = 10.0  # seconds
-
-
+# Helper Functions
 def _compact(text: str, limit: int = 200) -> str:
     """Compact text to a maximum length, truncating at word boundaries."""
     if not text:
@@ -283,73 +121,8 @@ def _compact(text: str, limit: int = 200) -> str:
     return truncated.rstrip(",.;- ")
 
 
-def _search_api(query: str) -> Optional[str]:
-    """Search the web using Tavily or SerpAPI if configured, return None otherwise.
-    
-    This demonstrates graceful degradation: tools work with or without API keys.
-    Students can enable real search by adding TAVILY_API_KEY or SERPAPI_API_KEY.
-    """
-    query = query.strip()
-    if not query:
-        return None
-
-    # Try Tavily first (recommended for AI apps)
-    tavily_key = os.getenv("TAVILY_API_KEY")
-    if tavily_key:
-        try:
-            with httpx.Client(timeout=SEARCH_TIMEOUT) as client:
-                resp = client.post(
-                    "https://api.tavily.com/search",
-                    json={
-                        "api_key": tavily_key,
-                        "query": query,
-                        "max_results": 3,
-                        "search_depth": "basic",
-                        "include_answer": True,
-                    },
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                answer = data.get("answer") or ""
-                snippets = [
-                    item.get("content") or item.get("snippet") or ""
-                    for item in data.get("results", [])
-                ]
-                combined = " ".join([answer] + snippets).strip()
-                if combined:
-                    return _compact(combined)
-        except Exception:
-            pass  # Fail gracefully, try next option
-
-    # Try SerpAPI as fallback
-    serp_key = os.getenv("SERPAPI_API_KEY")
-    if serp_key:
-        try:
-            with httpx.Client(timeout=SEARCH_TIMEOUT) as client:
-                resp = client.get(
-                    "https://serpapi.com/search",
-                    params={
-                        "api_key": serp_key,
-                        "engine": "google",
-                        "num": 5,
-                        "q": query,
-                    },
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                organic = data.get("organic_results", [])
-                snippets = [item.get("snippet", "") for item in organic]
-                combined = " ".join(snippets).strip()
-                if combined:
-                    return _compact(combined)
-        except Exception:
-            pass  # Fail gracefully
-
-    return None  # No search APIs configured
-
-
 def _llm_fallback(instruction: str, context: Optional[str] = None) -> str:
-    """Use the LLM to generate a response when search APIs aren't available.
+    """Use the LLM to generate a response when APIs aren't available.
     
     This ensures tools always return useful information, even without API keys.
     """
@@ -357,7 +130,7 @@ def _llm_fallback(instruction: str, context: Optional[str] = None) -> str:
     if context:
         prompt += "\nContext:\n" + context.strip()
     response = llm.invoke([
-        SystemMessage(content="You are a concise travel assistant."),
+        SystemMessage(content="You are a concise sports information assistant."),
         HumanMessage(content=prompt),
     ])
     return _compact(response.content)
@@ -369,417 +142,319 @@ def _with_prefix(prefix: str, summary: str) -> str:
     return _compact(text)
 
 
-# Tools with real API calls + LLM fallback (graceful degradation pattern)
+# Sport-Specific Tools (all using LLM fallback pattern for MVP)
+
 @tool
-def essential_info(destination: str) -> str:
-    """Return essential destination info like weather, sights, and etiquette."""
-    query = f"{destination} travel essentials weather best time top attractions etiquette language currency safety"
-    summary = _search_api(query)
-    if summary:
-        return _with_prefix(f"{destination} essentials", summary)
-    
-    # LLM fallback when no search API is configured
-    instruction = f"Summarize the climate, best visit time, standout sights, customs, language, currency, and safety tips for {destination}."
+def upcoming_games(teams: List[str], date: str = "today") -> str:
+    """Get upcoming games for specified teams."""
+    teams_str = ", ".join(teams)
+    instruction = f"List upcoming games for {teams_str} on {date}. Include opponent, time, and TV channel."
     return _llm_fallback(instruction)
 
 
 @tool
-def budget_basics(destination: str, duration: str) -> str:
-    """Return high-level budget categories for a given destination and duration."""
-    query = f"{destination} travel budget average daily costs {duration}"
-    summary = _search_api(query)
-    if summary:
-        return _with_prefix(f"{destination} budget {duration}", summary)
-    
-    instruction = f"Outline lodging, meals, transport, activities, and extra costs for a {duration} trip to {destination}."
+def game_times(games: str, timezone: str = "America/Los_Angeles") -> str:
+    """Convert game times to user's timezone."""
+    instruction = f"Convert these game times to {timezone} timezone: {games}"
     return _llm_fallback(instruction)
 
 
 @tool
-def local_flavor(destination: str, interests: Optional[str] = None) -> str:
-    """Suggest authentic local experiences matching optional interests."""
-    focus = interests or "local culture"
-    query = f"{destination} authentic local experiences {focus}"
-    summary = _search_api(query)
-    if summary:
-        return _with_prefix(f"{destination} {focus}", summary)
-    
-    instruction = f"Recommend authentic local experiences in {destination} that highlight {focus}."
+def tv_schedule(games: str) -> str:
+    """Find broadcast information for games."""
+    instruction = f"Provide TV channel or streaming service information for: {games}"
     return _llm_fallback(instruction)
 
 
 @tool
-def day_plan(destination: str, day: int) -> str:
-    """Return a simple day plan outline for a specific day number."""
-    query = f"{destination} day {day} itinerary highlights"
-    summary = _search_api(query)
-    if summary:
-        return _with_prefix(f"Day {day} in {destination}", summary)
-    
-    instruction = f"Outline key activities for day {day} in {destination}, covering morning, afternoon, and evening."
-    return _llm_fallback(instruction)
-
-
-# Additional simple tools per agent (to mirror original multi-tool behavior)
-@tool
-def weather_brief(destination: str) -> str:
-    """Return a brief weather summary for planning purposes."""
-    query = f"{destination} weather forecast travel season temperatures rainfall"
-    summary = _search_api(query)
-    if summary:
-        return _with_prefix(f"{destination} weather", summary)
-    
-    instruction = f"Give a weather brief for {destination} noting season, temperatures, rainfall, humidity, and packing guidance."
+def recent_results(teams: List[str], lookback_days: int = 1) -> str:
+    """Get recent game results for teams."""
+    teams_str = ", ".join(teams)
+    instruction = f"Provide scores and brief highlights for {teams_str} games in the last {lookback_days} day(s)."
     return _llm_fallback(instruction)
 
 
 @tool
-def visa_brief(destination: str) -> str:
-    """Return a brief visa guidance for travel planning."""
-    query = f"{destination} tourist visa requirements entry rules"
-    summary = _search_api(query)
-    if summary:
-        return _with_prefix(f"{destination} visa", summary)
-    
-    instruction = f"Provide a visa guidance summary for visiting {destination}, including advice to confirm with the relevant embassy."
+def live_scores(leagues: List[str]) -> str:
+    """Get current in-progress games for leagues."""
+    leagues_str = ", ".join(leagues)
+    instruction = f"List current in-progress games in {leagues_str} with live scores."
     return _llm_fallback(instruction)
 
 
 @tool
-def attraction_prices(destination: str, attractions: Optional[List[str]] = None) -> str:
-    """Return pricing information for attractions."""
-    items = attractions or ["popular attractions"]
-    focus = ", ".join(items)
-    query = f"{destination} attraction ticket prices {focus}"
-    summary = _search_api(query)
-    if summary:
-        return _with_prefix(f"{destination} attraction prices", summary)
-    
-    instruction = f"Share typical ticket prices and savings tips for attractions such as {focus} in {destination}."
+def team_standings(leagues: List[str]) -> str:
+    """Get current league standings."""
+    leagues_str = ", ".join(leagues)
+    instruction = f"Provide current standings/rankings for {leagues_str}."
     return _llm_fallback(instruction)
 
 
 @tool
-def local_customs(destination: str) -> str:
-    """Return cultural etiquette and customs information."""
-    query = f"{destination} cultural etiquette travel customs"
-    summary = _search_api(query)
-    if summary:
-        return _with_prefix(f"{destination} customs", summary)
-    
-    instruction = f"Summarize key etiquette and cultural customs travelers should know before visiting {destination}."
+def player_news(player_names: List[str]) -> str:
+    """Get latest news about specified players."""
+    players_str = ", ".join(player_names)
+    instruction = f"Provide latest news and updates about {players_str}."
     return _llm_fallback(instruction)
 
 
 @tool
-def hidden_gems(destination: str) -> str:
-    """Return lesser-known attractions and experiences."""
-    query = f"{destination} hidden gems local secrets lesser known spots"
-    summary = _search_api(query)
-    if summary:
-        return _with_prefix(f"{destination} hidden gems", summary)
-    
-    instruction = f"List lesser-known attractions or experiences that feel like hidden gems in {destination}."
+def injury_updates(teams: List[str]) -> str:
+    """Get injury reports for teams."""
+    teams_str = ", ".join(teams)
+    instruction = f"Provide injury report and return-to-play timelines for {teams_str}."
     return _llm_fallback(instruction)
 
 
 @tool
-def travel_time(from_location: str, to_location: str, mode: str = "public") -> str:
-    """Return travel time estimates between locations."""
-    query = f"travel time {from_location} to {to_location} by {mode}"
-    summary = _search_api(query)
-    if summary:
-        return _with_prefix(f"{from_location}→{to_location} {mode}", summary)
-    
-    instruction = f"Estimate travel time from {from_location} to {to_location} by {mode} transport."
+def player_stats(player_names: List[str]) -> str:
+    """Get recent performance statistics for players."""
+    players_str = ", ".join(player_names)
+    instruction = f"Provide recent performance stats (last 5 games) for {players_str}."
     return _llm_fallback(instruction)
 
 
-@tool
-def packing_list(destination: str, duration: str, activities: Optional[List[str]] = None) -> str:
-    """Return packing recommendations for the trip."""
-    acts = ", ".join(activities or ["sightseeing"])
-    query = f"what to pack for {destination} {duration} {acts}"
-    summary = _search_api(query)
-    if summary:
-        return _with_prefix(f"{destination} packing", summary)
-    
-    instruction = f"Suggest packing essentials for a {duration} trip to {destination} focused on {acts}."
-    return _llm_fallback(instruction)
-
-
-class TripState(TypedDict):
+# State Management
+class SportDigestState(TypedDict):
     messages: Annotated[List[BaseMessage], operator.add]
-    trip_request: Dict[str, Any]
-    research: Optional[str]
-    budget: Optional[str]
-    local: Optional[str]
-    final: Optional[str]
+    user_preferences: Dict[str, Any]
+    schedule: Optional[str]
+    scores: Optional[str]
+    player_news: Optional[str]
+    final_digest: Optional[str]
     tool_calls: Annotated[List[Dict[str, Any]], operator.add]
 
 
-def research_agent(state: TripState) -> TripState:
-    req = state["trip_request"]
-    destination = req["destination"]
+# Sport Agents
+def schedule_agent(state: SportDigestState) -> SportDigestState:
+    """Agent that gathers upcoming game schedules."""
+    prefs = state["user_preferences"]
+    teams = prefs.get("teams", [])
+    timezone = prefs.get("timezone", "America/Los_Angeles")
+    
     prompt_t = (
-        "You are a research assistant.\n"
-        "Gather essential information about {destination}.\n"
-        "Use tools to get weather, visa, and essential info, then summarize."
+        "You are a sports schedule assistant.\n"
+        "Find upcoming games for these teams: {teams}.\n"
+        "User timezone: {timezone}.\n"
+        "Use tools to get game schedules, times, and broadcast information."
     )
-    vars_ = {"destination": destination}
+    vars_ = {"teams": ", ".join(teams), "timezone": timezone}
     
     messages = [SystemMessage(content=prompt_t.format(**vars_))]
-    tools = [essential_info, weather_brief, visa_brief]
-    agent = llm.bind_tools(tools)
-    
-    calls: List[Dict[str, Any]] = []
-    tool_results = []
-    
-    # Agent metadata and prompt template instrumentation
-    with using_attributes(tags=["research", "info_gathering"]):
-        if _TRACING:
-            current_span = trace.get_current_span()
-            if current_span:
-                current_span.set_attribute("metadata.agent_type", "research")
-                current_span.set_attribute("metadata.agent_node", "research_agent")
-        
-        with using_prompt_template(template=prompt_t, variables=vars_, version="v1"):
-            res = agent.invoke(messages)
-    
-    # Collect tool calls and execute them
-    if getattr(res, "tool_calls", None):
-        for c in res.tool_calls:
-            calls.append({"agent": "research", "tool": c["name"], "args": c.get("args", {})})
-        
-        tool_node = ToolNode(tools)
-        tr = tool_node.invoke({"messages": [res]})
-        tool_results = tr["messages"]
-        
-        # Add tool results to conversation and ask LLM to synthesize
-        messages.append(res)
-        messages.extend(tool_results)
-        
-        synthesis_prompt = "Based on the above information, provide a comprehensive summary for the traveler."
-        messages.append(SystemMessage(content=synthesis_prompt))
-        
-        # Instrument synthesis LLM call with its own prompt template
-        synthesis_vars = {"destination": destination, "context": "tool_results"}
-        with using_prompt_template(template=synthesis_prompt, variables=synthesis_vars, version="v1-synthesis"):
-            final_res = llm.invoke(messages)
-        out = final_res.content
-    else:
-        out = res.content
-
-    return {"messages": [SystemMessage(content=out)], "research": out, "tool_calls": calls}
-
-
-def budget_agent(state: TripState) -> TripState:
-    req = state["trip_request"]
-    destination, duration = req["destination"], req["duration"]
-    budget = req.get("budget", "moderate")
-    prompt_t = (
-        "You are a budget analyst.\n"
-        "Analyze costs for {destination} over {duration} with budget: {budget}.\n"
-        "Use tools to get pricing information, then provide a detailed breakdown."
-    )
-    vars_ = {"destination": destination, "duration": duration, "budget": budget}
-    
-    messages = [SystemMessage(content=prompt_t.format(**vars_))]
-    tools = [budget_basics, attraction_prices]
+    tools = [upcoming_games, game_times, tv_schedule]
     agent = llm.bind_tools(tools)
     
     calls: List[Dict[str, Any]] = []
     
     # Agent metadata and prompt template instrumentation
-    with using_attributes(tags=["budget", "cost_analysis"]):
+    with using_attributes(tags=["schedule", "upcoming_games"]):
         if _TRACING:
             current_span = trace.get_current_span()
             if current_span:
-                current_span.set_attribute("metadata.agent_type", "budget")
-                current_span.set_attribute("metadata.agent_node", "budget_agent")
+                current_span.set_attribute("metadata.agent_type", "schedule")
+                current_span.set_attribute("metadata.agent_node", "schedule_agent")
         
         with using_prompt_template(template=prompt_t, variables=vars_, version="v1"):
             res = agent.invoke(messages)
     
     if getattr(res, "tool_calls", None):
         for c in res.tool_calls:
-            calls.append({"agent": "budget", "tool": c["name"], "args": c.get("args", {})})
+            calls.append({"agent": "schedule", "tool": c["name"], "args": c.get("args", {})})
         
         tool_node = ToolNode(tools)
         tr = tool_node.invoke({"messages": [res]})
         
-        # Add tool results and ask for synthesis
         messages.append(res)
         messages.extend(tr["messages"])
         
-        synthesis_prompt = f"Create a detailed budget breakdown for {duration} in {destination} with a {budget} budget."
+        synthesis_prompt = "Based on the schedule information, create a concise summary of today's and upcoming games."
         messages.append(SystemMessage(content=synthesis_prompt))
         
-        # Instrument synthesis LLM call
-        synthesis_vars = {"duration": duration, "destination": destination, "budget": budget}
+        synthesis_vars = {"teams": ", ".join(teams)}
         with using_prompt_template(template=synthesis_prompt, variables=synthesis_vars, version="v1-synthesis"):
             final_res = llm.invoke(messages)
         out = final_res.content
     else:
         out = res.content
 
-    return {"messages": [SystemMessage(content=out)], "budget": out, "tool_calls": calls}
+    return {"messages": [SystemMessage(content=out)], "schedule": out, "tool_calls": calls}
 
 
-def local_agent(state: TripState) -> TripState:
-    req = state["trip_request"]
-    destination = req["destination"]
-    interests = req.get("interests", "local culture")
-    travel_style = req.get("travel_style", "standard")
-    
-    # RAG: Retrieve curated local guides if enabled
-    context_lines = []
-    if ENABLE_RAG:
-        retrieved = GUIDE_RETRIEVER.retrieve(destination, interests, k=3)
-        if retrieved:
-            context_lines.append("=== Curated Local Guides (from database) ===")
-            for idx, item in enumerate(retrieved, 1):
-                content = item["content"]
-                source = item["metadata"].get("source", "Unknown")
-                context_lines.append(f"{idx}. {content}")
-                context_lines.append(f"   Source: {source}")
-            context_lines.append("=== End of Curated Guides ===\n")
-    
-    context_text = "\n".join(context_lines) if context_lines else ""
+def scores_agent(state: SportDigestState) -> SportDigestState:
+    """Agent that gathers recent scores and standings."""
+    prefs = state["user_preferences"]
+    teams = prefs.get("teams", [])
+    leagues = prefs.get("leagues", [])
     
     prompt_t = (
-        "You are a local guide.\n"
-        "Find authentic experiences in {destination} for someone interested in: {interests}.\n"
-        "Travel style: {travel_style}. Use tools to gather local insights.\n"
+        "You are a sports scores analyst.\n"
+        "Get recent results for these teams: {teams}.\n"
+        "Also check standings in these leagues: {leagues}.\n"
+        "Use tools to get scores, live games, and standings."
     )
-    
-    # Add retrieved context to prompt if available
-    if context_text:
-        prompt_t += "\nRelevant curated experiences from our database:\n{context}\n"
-    
-    vars_ = {
-        "destination": destination,
-        "interests": interests,
-        "travel_style": travel_style,
-        "context": context_text if context_text else "No curated context available.",
-    }
+    vars_ = {"teams": ", ".join(teams), "leagues": ", ".join(leagues)}
     
     messages = [SystemMessage(content=prompt_t.format(**vars_))]
-    tools = [local_flavor, local_customs, hidden_gems]
+    tools = [recent_results, live_scores, team_standings]
     agent = llm.bind_tools(tools)
     
     calls: List[Dict[str, Any]] = []
     
-    # Agent metadata and prompt template instrumentation
-    with using_attributes(tags=["local", "local_experiences"]):
+    with using_attributes(tags=["scores", "results"]):
         if _TRACING:
             current_span = trace.get_current_span()
             if current_span:
-                current_span.set_attribute("metadata.agent_type", "local")
-                current_span.set_attribute("metadata.agent_node", "local_agent")
-                if ENABLE_RAG and context_text:
-                    current_span.set_attribute("metadata.rag_enabled", "true")
+                current_span.set_attribute("metadata.agent_type", "scores")
+                current_span.set_attribute("metadata.agent_node", "scores_agent")
         
         with using_prompt_template(template=prompt_t, variables=vars_, version="v1"):
             res = agent.invoke(messages)
     
     if getattr(res, "tool_calls", None):
         for c in res.tool_calls:
-            calls.append({"agent": "local", "tool": c["name"], "args": c.get("args", {})})
+            calls.append({"agent": "scores", "tool": c["name"], "args": c.get("args", {})})
         
         tool_node = ToolNode(tools)
         tr = tool_node.invoke({"messages": [res]})
         
-        # Add tool results and ask for synthesis
         messages.append(res)
         messages.extend(tr["messages"])
         
-        synthesis_prompt = f"Create a curated list of authentic experiences for someone interested in {interests} with a {travel_style} approach."
+        synthesis_prompt = "Summarize recent scores, highlight key results, and mention current standings."
         messages.append(SystemMessage(content=synthesis_prompt))
         
-        # Instrument synthesis LLM call
-        synthesis_vars = {"interests": interests, "travel_style": travel_style, "destination": destination}
-        with using_prompt_template(template=synthesis_prompt, variables=synthesis_vars, version="v1-synthesis"):
+        with using_prompt_template(template=synthesis_prompt, variables=vars_, version="v1-synthesis"):
             final_res = llm.invoke(messages)
         out = final_res.content
     else:
         out = res.content
 
-    return {"messages": [SystemMessage(content=out)], "local": out, "tool_calls": calls}
+    return {"messages": [SystemMessage(content=out)], "scores": out, "tool_calls": calls}
 
 
-def itinerary_agent(state: TripState) -> TripState:
-    req = state["trip_request"]
-    destination = req["destination"]
-    duration = req["duration"]
-    travel_style = req.get("travel_style", "standard")
-    user_input = (req.get("user_input") or "").strip()
+def player_agent(state: SportDigestState) -> SportDigestState:
+    """Agent that gathers player news and updates."""
+    prefs = state["user_preferences"]
+    players = prefs.get("players", [])
+    teams = prefs.get("teams", [])
+    
+    prompt_t = (
+        "You are a sports news reporter.\n"
+        "Get news and updates for these players: {players}.\n"
+        "Also check injury reports for teams: {teams}.\n"
+        "Use tools to gather player news, injury updates, and performance stats."
+    )
+    vars_ = {"players": ", ".join(players) if players else "none", "teams": ", ".join(teams)}
+    
+    messages = [SystemMessage(content=prompt_t.format(**vars_))]
+    tools = [player_news, injury_updates, player_stats]
+    agent = llm.bind_tools(tools)
+    
+    calls: List[Dict[str, Any]] = []
+    
+    with using_attributes(tags=["player", "news"]):
+        if _TRACING:
+            current_span = trace.get_current_span()
+            if current_span:
+                current_span.set_attribute("metadata.agent_type", "player")
+                current_span.set_attribute("metadata.agent_node", "player_agent")
+        
+        with using_prompt_template(template=prompt_t, variables=vars_, version="v1"):
+            res = agent.invoke(messages)
+    
+    if getattr(res, "tool_calls", None):
+        for c in res.tool_calls:
+            calls.append({"agent": "player", "tool": c["name"], "args": c.get("args", {})})
+        
+        tool_node = ToolNode(tools)
+        tr = tool_node.invoke({"messages": [res]})
+        
+        messages.append(res)
+        messages.extend(tr["messages"])
+        
+        synthesis_prompt = "Summarize player news, injury updates, and notable performances."
+        messages.append(SystemMessage(content=synthesis_prompt))
+        
+        with using_prompt_template(template=synthesis_prompt, variables=vars_, version="v1-synthesis"):
+            final_res = llm.invoke(messages)
+        out = final_res.content
+    else:
+        out = res.content
+
+    return {"messages": [SystemMessage(content=out)], "player_news": out, "tool_calls": calls}
+
+
+def digest_agent(state: SportDigestState) -> SportDigestState:
+    """Agent that synthesizes all information into a formatted digest."""
+    prefs = state["user_preferences"]
+    teams = prefs.get("teams", [])
+    players = prefs.get("players", [])
     
     prompt_parts = [
-        "Create a {duration} itinerary for {destination} ({travel_style}).",
+        "Create a daily sports digest for a fan following:",
+        "Teams: {teams}",
+        "Players: {players}",
         "",
-        "Inputs:",
-        "Research: {research}",
-        "Budget: {budget}",
-        "Local: {local}",
+        "Information gathered:",
+        "Schedule: {schedule}",
+        "Scores: {scores}",
+        "Player News: {player_news}",
+        "",
+        "Format the digest with clear sections:",
+        "1. YESTERDAY'S RESULTS",
+        "2. TODAY'S SCHEDULE",
+        "3. PLAYER NEWS",
+        "",
+        "Use emojis and make it engaging but concise."
     ]
-    if user_input:
-        prompt_parts.append("User input: {user_input}")
     
     prompt_t = "\n".join(prompt_parts)
     vars_ = {
-        "duration": duration,
-        "destination": destination,
-        "travel_style": travel_style,
-        "research": (state.get("research") or "")[:400],
-        "budget": (state.get("budget") or "")[:400],
-        "local": (state.get("local") or "")[:400],
-        "user_input": user_input,
+        "teams": ", ".join(teams),
+        "players": ", ".join(players) if players else "none",
+        "schedule": (state.get("schedule") or "")[:400],
+        "scores": (state.get("scores") or "")[:400],
+        "player_news": (state.get("player_news") or "")[:400],
     }
     
-    # Add span attributes for better observability in Arize
-    # NOTE: using_attributes must be OUTER context for proper propagation
-    with using_attributes(tags=["itinerary", "final_agent"]):
+    with using_attributes(tags=["digest", "synthesis"]):
         if _TRACING:
             current_span = trace.get_current_span()
             if current_span:
-                current_span.set_attribute("metadata.itinerary", "true")
-                current_span.set_attribute("metadata.agent_type", "itinerary")
-                current_span.set_attribute("metadata.agent_node", "itinerary_agent")
-                if user_input:
-                    current_span.set_attribute("metadata.user_input", user_input)
+                current_span.set_attribute("metadata.agent_type", "digest")
+                current_span.set_attribute("metadata.agent_node", "digest_agent")
         
-        # Prompt template wrapper for Arize Playground integration
         with using_prompt_template(template=prompt_t, variables=vars_, version="v1"):
             res = llm.invoke([SystemMessage(content=prompt_t.format(**vars_))])
     
-    return {"messages": [SystemMessage(content=res.content)], "final": res.content}
+    return {"messages": [SystemMessage(content=res.content)], "final_digest": res.content}
 
 
 def build_graph():
-    g = StateGraph(TripState)
-    g.add_node("research_node", research_agent)
-    g.add_node("budget_node", budget_agent)
-    g.add_node("local_node", local_agent)
-    g.add_node("itinerary_node", itinerary_agent)
+    """Build LangGraph workflow with parallel agent execution."""
+    g = StateGraph(SportDigestState)
+    g.add_node("schedule_node", schedule_agent)
+    g.add_node("scores_node", scores_agent)
+    g.add_node("player_node", player_agent)
+    g.add_node("digest_node", digest_agent)
 
-    # Run research, budget, and local agents in parallel
-    g.add_edge(START, "research_node")
-    g.add_edge(START, "budget_node")
-    g.add_edge(START, "local_node")
+    # Run schedule, scores, and player agents in parallel
+    g.add_edge(START, "schedule_node")
+    g.add_edge(START, "scores_node")
+    g.add_edge(START, "player_node")
     
-    # All three agents feed into the itinerary agent
-    g.add_edge("research_node", "itinerary_node")
-    g.add_edge("budget_node", "itinerary_node")
-    g.add_edge("local_node", "itinerary_node")
+    # All three agents feed into the digest agent
+    g.add_edge("schedule_node", "digest_node")
+    g.add_edge("scores_node", "digest_node")
+    g.add_edge("player_node", "digest_node")
     
-    g.add_edge("itinerary_node", END)
+    g.add_edge("digest_node", END)
 
     # Compile without checkpointer to avoid state persistence issues
     return g.compile()
 
 
-app = FastAPI(title="AI Trip Planner")
+app = FastAPI(title="Sport Agent")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -800,7 +475,7 @@ def serve_frontend():
 
 @app.get("/health")
 def health():
-    return {"status": "healthy", "service": "ai-trip-planner"}
+    return {"status": "healthy", "service": "sport-agent"}
 
 
 # Initialize tracing once at startup, not per request
@@ -809,48 +484,146 @@ if _TRACING:
         space_id = os.getenv("ARIZE_SPACE_ID")
         api_key = os.getenv("ARIZE_API_KEY")
         if space_id and api_key:
-            tp = register(space_id=space_id, api_key=api_key, project_name="ai-trip-planner")
+            tp = register(space_id=space_id, api_key=api_key, project_name="sport-agent")
             LangChainInstrumentor().instrument(tracer_provider=tp, include_chains=True, include_agents=True, include_tools=True)
             LiteLLMInstrumentor().instrument(tracer_provider=tp, skip_dep_check=True)
     except Exception:
         pass
 
-@app.post("/plan-trip", response_model=TripResponse)
-def plan_trip(req: TripRequest):
-    graph = build_graph()
+
+# Startup and Shutdown Events
+@app.on_event("startup")
+def startup_event():
+    """Initialize scheduler on startup."""
+    start_scheduler()
+
+
+@app.on_event("shutdown")
+def shutdown_event():
+    """Gracefully shutdown scheduler."""
+    stop_scheduler()
+
+
+# API Endpoints
+@app.post("/configure-interests")
+def configure_interests(req: SportPreferencesRequest):
+    """Save user sport preferences and schedule daily digest."""
+    user_id = req.user_id or str(uuid.uuid4())
     
-    # Only include necessary fields in initial state
-    # Agent outputs (research, budget, local, final) will be added during execution
+    # Save preferences
+    prefs_dict = req.model_dump()
+    prefs_dict["user_id"] = user_id
+    success = save_preferences(user_id, prefs_dict)
+    
+    if not success:
+        raise HTTPException(500, "Failed to save preferences")
+    
+    # Schedule daily digest
+    schedule_daily_digest(user_id, req.delivery_time, req.timezone)
+    
+    return {"status": "saved", "user_id": user_id, "message": "Preferences saved and digest scheduled"}
+
+
+@app.post("/generate-digest", response_model=DigestResponse)
+def generate_digest(req: DigestRequest):
+    """Generate digest on-demand for a user."""
+    user_id = req.user_id
+    prefs = load_preferences(user_id)
+    
+    if not prefs:
+        raise HTTPException(404, "User not found. Please configure interests first.")
+    
+    graph = build_graph()
     state = {
         "messages": [],
-        "trip_request": req.model_dump(),
+        "user_preferences": prefs,
         "tool_calls": [],
     }
     
     # Add session and user tracking attributes to the trace
-    session_id = req.session_id
-    user_id = req.user_id
-    turn_idx = req.turn_index
+    attrs_kwargs = {"user_id": user_id}
     
-    # Build attributes for session and user tracking
-    attrs_kwargs = {}
-    if session_id:
-        attrs_kwargs["session_id"] = session_id
-    if user_id:
-        attrs_kwargs["user_id"] = user_id
-    
-    # Add turn_index as a custom span attribute if provided
-    if turn_idx is not None and _TRACING:
+    if _TRACING:
         with using_attributes(**attrs_kwargs):
             current_span = trace.get_current_span()
             if current_span:
-                current_span.set_attribute("turn_index", turn_idx)
+                current_span.set_attribute("user_id", user_id)
             out = graph.invoke(state)
     else:
-        with using_attributes(**attrs_kwargs):
-            out = graph.invoke(state)
+        out = graph.invoke(state)
     
-    return TripResponse(result=out.get("final", ""), tool_calls=out.get("tool_calls", []))
+    digest = out.get("final_digest", "")
+    timestamp = datetime.now().isoformat()
+    
+    # Save to history
+    save_digest_history(user_id, digest, timestamp)
+    
+    return DigestResponse(
+        digest=digest,
+        generated_at=timestamp,
+        tool_calls=out.get("tool_calls", [])
+    )
+
+
+@app.get("/preferences/{user_id}")
+def get_preferences(user_id: str):
+    """Retrieve user preferences."""
+    prefs = load_preferences(user_id)
+    if not prefs:
+        raise HTTPException(404, "User not found")
+    return prefs
+
+
+@app.put("/preferences/{user_id}")
+def update_preferences(user_id: str, req: SportPreferencesRequest):
+    """Update user preferences and reschedule digest."""
+    prefs = load_preferences(user_id)
+    if not prefs:
+        raise HTTPException(404, "User not found")
+    
+    # Update preferences
+    prefs_dict = req.model_dump()
+    prefs_dict["user_id"] = user_id
+    success = save_preferences(user_id, prefs_dict)
+    
+    if not success:
+        raise HTTPException(500, "Failed to update preferences")
+    
+    # Reschedule daily digest
+    schedule_daily_digest(user_id, req.delivery_time, req.timezone)
+    
+    return {"status": "updated", "message": "Preferences updated and digest rescheduled"}
+
+
+@app.delete("/preferences/{user_id}")
+def delete_user_preferences(user_id: str):
+    """Delete user preferences and unschedule digest."""
+    success = delete_preferences(user_id)
+    if not success:
+        raise HTTPException(404, "User not found")
+    
+    # Unschedule digest
+    unschedule_digest(user_id)
+    
+    return {"status": "deleted", "message": "User preferences deleted and digest unscheduled"}
+
+
+@app.get("/digest-history/{user_id}")
+def digest_history(user_id: str, limit: int = 10):
+    """Get digest history for a user."""
+    prefs = load_preferences(user_id)
+    if not prefs:
+        raise HTTPException(404, "User not found")
+    
+    history = get_digest_history(user_id, limit)
+    return {"user_id": user_id, "history": history}
+
+
+@app.get("/scheduled-jobs")
+def scheduled_jobs():
+    """Get list of all scheduled digest jobs."""
+    jobs = get_scheduled_jobs()
+    return {"jobs": jobs}
 
 
 if __name__ == "__main__":

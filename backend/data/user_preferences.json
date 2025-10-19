@@ -1,0 +1,25 @@
+{
+  "users": {
+    "61b9a2e2-6629-48d1-b2ee-910173eeb307": {
+      "teams": [
+        "Manchester City"
+      ],
+      "players": [
+        "Joao Fonseca"
+      ],
+      "leagues": [
+        "Premier League",
+        "ATP tournaments"
+      ],
+      "delivery_time": "07:00",
+      "timezone": "America/Los_Angeles",
+      "user_id": "61b9a2e2-6629-48d1-b2ee-910173eeb307",
+      "digest_history": [
+        {
+          "digest": "\ud83c\udfc6 YESTERDAY'S RESULTS \ud83c\udfc6\nManchester City continues their winning streak with impressive victories over Everton (3-1) and Arsenal (5-0). Key goal scorers included De Bruyne, Foden, Mahrez, Gundogan, Torres, and a hat-trick from De Bruyne. City sits comfortably at the top of the Premier League standings!\n\n\u26bd\ufe0f TODAY'S SCHEDULE \u26bd\ufe0f\nDon't miss Manchester City's upcoming game against Crystal Palace at 3:00 PM GMT. Tune in to NBC Sports Network to catch the action live!\n\n\ud83c\udf1f PLAYER NEWS \ud83c\udf1f\nExciting news for Manchester City as Joao Fonseca has recently signed with a top European club, bringing his skills and versatility to the team's defense. Additionally, all players are fit and available for selection with no major injuries in the squad. Great news for the Cityzens!",
+          "timestamp": "2025-10-19T19:08:14.790900"
+        }
+      ]
+    }
+  }
+}
