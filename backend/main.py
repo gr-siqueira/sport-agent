@@ -12,15 +12,18 @@ from pathlib import Path
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
 
-# Minimal observability via Arize/OpenInference (optional)
+# Arize AX Observability via OpenInference (optional)
 try:
     from arize.otel import register
     from openinference.instrumentation.langchain import LangChainInstrumentor
+    from openinference.instrumentation.openai import OpenAIInstrumentor
     from openinference.instrumentation.litellm import LiteLLMInstrumentor
     from openinference.instrumentation import using_prompt_template, using_metadata, using_attributes
     from opentelemetry import trace
+    from opentelemetry.trace import Status, StatusCode
     _TRACING = True
-except Exception:
+except Exception as e:
+    print(f"Warning: Tracing libraries not available: {e}")
     def using_prompt_template(**kwargs):  # type: ignore
         from contextlib import contextmanager
         @contextmanager
@@ -635,13 +638,18 @@ def schedule_agent(state: SportDigestState) -> SportDigestState:
     
     calls: List[Dict[str, Any]] = []
     
-    # Agent metadata and prompt template instrumentation
-    with using_attributes(tags=["schedule", "upcoming_games"]):
+    # Enhanced agent metadata and prompt template instrumentation
+    with using_attributes(tags=["schedule", "upcoming_games", "agent"]):
         if _TRACING:
             current_span = trace.get_current_span()
-            if current_span:
-                current_span.set_attribute("metadata.agent_type", "schedule")
-                current_span.set_attribute("metadata.agent_node", "schedule_agent")
+            if current_span and current_span.is_recording():
+                current_span.set_attribute("agent.type", "schedule")
+                current_span.set_attribute("agent.name", "schedule_agent")
+                current_span.set_attribute("agent.role", "schedule_gatherer")
+                current_span.set_attribute("agent.teams_count", len(teams))
+                current_span.set_attribute("agent.teams", ",".join(teams) if teams else "none")
+                current_span.set_attribute("agent.timezone", timezone)
+                current_span.set_attribute("agent.tools_available", str([t.name for t in tools]))
         
         with using_prompt_template(template=prompt_t, variables=vars_, version="v1"):
             res = agent.invoke(messages)
@@ -649,6 +657,12 @@ def schedule_agent(state: SportDigestState) -> SportDigestState:
     if getattr(res, "tool_calls", None):
         for c in res.tool_calls:
             calls.append({"agent": "schedule", "tool": c["name"], "args": c.get("args", {})})
+        
+        if _TRACING:
+            current_span = trace.get_current_span()
+            if current_span and current_span.is_recording():
+                current_span.set_attribute("agent.tool_calls_count", len(res.tool_calls))
+                current_span.set_attribute("agent.tools_used", str([c["name"] for c in res.tool_calls]))
         
         tool_node = ToolNode(tools)
         tr = tool_node.invoke({"messages": [res]})
@@ -665,6 +679,12 @@ def schedule_agent(state: SportDigestState) -> SportDigestState:
         out = final_res.content
     else:
         out = res.content
+    
+    if _TRACING:
+        current_span = trace.get_current_span()
+        if current_span and current_span.is_recording():
+            current_span.set_attribute("agent.output_length", len(out))
+            current_span.set_attribute("agent.success", True)
 
     return {"messages": [SystemMessage(content=out)], "schedule": out, "tool_calls": calls}
 
@@ -689,12 +709,18 @@ def scores_agent(state: SportDigestState) -> SportDigestState:
     
     calls: List[Dict[str, Any]] = []
     
-    with using_attributes(tags=["scores", "results"]):
+    with using_attributes(tags=["scores", "results", "agent"]):
         if _TRACING:
             current_span = trace.get_current_span()
-            if current_span:
-                current_span.set_attribute("metadata.agent_type", "scores")
-                current_span.set_attribute("metadata.agent_node", "scores_agent")
+            if current_span and current_span.is_recording():
+                current_span.set_attribute("agent.type", "scores")
+                current_span.set_attribute("agent.name", "scores_agent")
+                current_span.set_attribute("agent.role", "scores_analyst")
+                current_span.set_attribute("agent.teams_count", len(teams))
+                current_span.set_attribute("agent.leagues_count", len(leagues))
+                current_span.set_attribute("agent.teams", ",".join(teams) if teams else "none")
+                current_span.set_attribute("agent.leagues", ",".join(leagues) if leagues else "none")
+                current_span.set_attribute("agent.tools_available", str([t.name for t in tools]))
         
         with using_prompt_template(template=prompt_t, variables=vars_, version="v1"):
             res = agent.invoke(messages)
@@ -702,6 +728,12 @@ def scores_agent(state: SportDigestState) -> SportDigestState:
     if getattr(res, "tool_calls", None):
         for c in res.tool_calls:
             calls.append({"agent": "scores", "tool": c["name"], "args": c.get("args", {})})
+        
+        if _TRACING:
+            current_span = trace.get_current_span()
+            if current_span and current_span.is_recording():
+                current_span.set_attribute("agent.tool_calls_count", len(res.tool_calls))
+                current_span.set_attribute("agent.tools_used", str([c["name"] for c in res.tool_calls]))
         
         tool_node = ToolNode(tools)
         tr = tool_node.invoke({"messages": [res]})
@@ -717,6 +749,12 @@ def scores_agent(state: SportDigestState) -> SportDigestState:
         out = final_res.content
     else:
         out = res.content
+    
+    if _TRACING:
+        current_span = trace.get_current_span()
+        if current_span and current_span.is_recording():
+            current_span.set_attribute("agent.output_length", len(out))
+            current_span.set_attribute("agent.success", True)
 
     return {"messages": [SystemMessage(content=out)], "scores": out, "tool_calls": calls}
 
@@ -741,12 +779,18 @@ def player_agent(state: SportDigestState) -> SportDigestState:
     
     calls: List[Dict[str, Any]] = []
     
-    with using_attributes(tags=["player", "news"]):
+    with using_attributes(tags=["player", "news", "agent"]):
         if _TRACING:
             current_span = trace.get_current_span()
-            if current_span:
-                current_span.set_attribute("metadata.agent_type", "player")
-                current_span.set_attribute("metadata.agent_node", "player_agent")
+            if current_span and current_span.is_recording():
+                current_span.set_attribute("agent.type", "player")
+                current_span.set_attribute("agent.name", "player_agent")
+                current_span.set_attribute("agent.role", "news_reporter")
+                current_span.set_attribute("agent.players_count", len(players))
+                current_span.set_attribute("agent.teams_count", len(teams))
+                current_span.set_attribute("agent.players", ",".join(players) if players else "none")
+                current_span.set_attribute("agent.teams", ",".join(teams) if teams else "none")
+                current_span.set_attribute("agent.tools_available", str([t.name for t in tools]))
         
         with using_prompt_template(template=prompt_t, variables=vars_, version="v1"):
             res = agent.invoke(messages)
@@ -754,6 +798,12 @@ def player_agent(state: SportDigestState) -> SportDigestState:
     if getattr(res, "tool_calls", None):
         for c in res.tool_calls:
             calls.append({"agent": "player", "tool": c["name"], "args": c.get("args", {})})
+        
+        if _TRACING:
+            current_span = trace.get_current_span()
+            if current_span and current_span.is_recording():
+                current_span.set_attribute("agent.tool_calls_count", len(res.tool_calls))
+                current_span.set_attribute("agent.tools_used", str([c["name"] for c in res.tool_calls]))
         
         tool_node = ToolNode(tools)
         tr = tool_node.invoke({"messages": [res]})
@@ -769,6 +819,12 @@ def player_agent(state: SportDigestState) -> SportDigestState:
         out = final_res.content
     else:
         out = res.content
+    
+    if _TRACING:
+        current_span = trace.get_current_span()
+        if current_span and current_span.is_recording():
+            current_span.set_attribute("agent.output_length", len(out))
+            current_span.set_attribute("agent.success", True)
 
     return {"messages": [SystemMessage(content=out)], "player_news": out, "tool_calls": calls}
 
@@ -803,12 +859,20 @@ def analysis_agent(state: SportDigestState) -> SportDigestState:
     
     calls: List[Dict[str, Any]] = []
     
-    with using_attributes(tags=["analysis", "intelligence"]):
+    with using_attributes(tags=["analysis", "intelligence", "agent"]):
         if _TRACING:
             current_span = trace.get_current_span()
-            if current_span:
-                current_span.set_attribute("metadata.agent_type", "analysis")
-                current_span.set_attribute("metadata.agent_node", "analysis_agent")
+            if current_span and current_span.is_recording():
+                current_span.set_attribute("agent.type", "analysis")
+                current_span.set_attribute("agent.name", "analysis_agent")
+                current_span.set_attribute("agent.role", "sports_analyst")
+                current_span.set_attribute("agent.teams_count", len(teams))
+                current_span.set_attribute("agent.leagues_count", len(leagues))
+                current_span.set_attribute("agent.teams", ",".join(teams) if teams else "none")
+                current_span.set_attribute("agent.leagues", ",".join(leagues) if leagues else "none")
+                current_span.set_attribute("agent.has_schedule_context", bool(schedule_info))
+                current_span.set_attribute("agent.has_scores_context", bool(scores_info))
+                current_span.set_attribute("agent.tools_available", str([t.name for t in tools]))
         
         with using_prompt_template(template=prompt_t, variables=vars_, version="v1"):
             res = agent.invoke(messages)
@@ -816,6 +880,12 @@ def analysis_agent(state: SportDigestState) -> SportDigestState:
     if getattr(res, "tool_calls", None):
         for c in res.tool_calls:
             calls.append({"agent": "analysis", "tool": c["name"], "args": c.get("args", {})})
+        
+        if _TRACING:
+            current_span = trace.get_current_span()
+            if current_span and current_span.is_recording():
+                current_span.set_attribute("agent.tool_calls_count", len(res.tool_calls))
+                current_span.set_attribute("agent.tools_used", str([c["name"] for c in res.tool_calls]))
         
         tool_node = ToolNode(tools)
         tr = tool_node.invoke({"messages": [res]})
@@ -835,6 +905,12 @@ def analysis_agent(state: SportDigestState) -> SportDigestState:
         out = final_res.content
     else:
         out = res.content
+    
+    if _TRACING:
+        current_span = trace.get_current_span()
+        if current_span and current_span.is_recording():
+            current_span.set_attribute("agent.output_length", len(out))
+            current_span.set_attribute("agent.success", True)
 
     return {"messages": [SystemMessage(content=out)], "analysis": out, "tool_calls": calls}
 
@@ -1004,12 +1080,20 @@ def digest_agent(state: SportDigestState) -> SportDigestState:
         digest += f"📅 PRÓXIMOS JOGOS\n{schedule[:300]}\n\n"
         digest += f"🗞️ NOTÍCIAS\n{player_news[:300]}"
     
-    with using_attributes(tags=["digest", "synthesis"]):
+    with using_attributes(tags=["digest", "synthesis", "agent"]):
         if _TRACING:
             current_span = trace.get_current_span()
-            if current_span:
-                current_span.set_attribute("metadata.agent_type", "digest")
-                current_span.set_attribute("metadata.agent_node", "digest_agent")
+            if current_span and current_span.is_recording():
+                current_span.set_attribute("agent.type", "digest")
+                current_span.set_attribute("agent.name", "digest_agent")
+                current_span.set_attribute("agent.role", "digest_synthesizer")
+                current_span.set_attribute("agent.has_schedule", bool(schedule))
+                current_span.set_attribute("agent.has_scores", bool(scores))
+                current_span.set_attribute("agent.has_player_news", bool(player_news))
+                current_span.set_attribute("agent.has_analysis", bool(analysis))
+                current_span.set_attribute("agent.sections_count", len(sections))
+                current_span.set_attribute("agent.digest_length", len(digest))
+                current_span.set_attribute("agent.success", True)
     
     return {"messages": [SystemMessage(content=digest)], "final_digest": digest}
 
@@ -1065,17 +1149,51 @@ def health():
     return {"status": "healthy", "service": "sport-agent"}
 
 
-# Initialize tracing once at startup, not per request
+# Initialize Arize AX tracing once at startup, not per request
 if _TRACING:
     try:
         space_id = os.getenv("ARIZE_SPACE_ID")
         api_key = os.getenv("ARIZE_API_KEY")
         if space_id and api_key:
-            tp = register(space_id=space_id, api_key=api_key, project_name="sport-agent")
-            LangChainInstrumentor().instrument(tracer_provider=tp, include_chains=True, include_agents=True, include_tools=True)
-            LiteLLMInstrumentor().instrument(tracer_provider=tp, skip_dep_check=True)
-    except Exception:
-        pass
+            print("✓ Initializing Arize AX tracing...")
+            
+            # Register tracer provider with Arize
+            tp = register(
+                space_id=space_id,
+                api_key=api_key,
+                project_name=os.getenv("ARIZE_PROJECT_NAME", "sport-agent"),
+                # Endpoint is automatically set to Arize's collector
+            )
+            
+            # Instrument LangChain for agent and chain tracing
+            LangChainInstrumentor().instrument(
+                tracer_provider=tp,
+                include_chains=True,
+                include_agents=True,
+                include_tools=True,
+                skip_dep_check=True
+            )
+            
+            # Instrument OpenAI for LLM call tracing
+            OpenAIInstrumentor().instrument(
+                tracer_provider=tp,
+                skip_dep_check=True
+            )
+            
+            # Instrument LiteLLM as fallback
+            LiteLLMInstrumentor().instrument(
+                tracer_provider=tp,
+                skip_dep_check=True
+            )
+            
+            print(f"✓ Arize AX tracing enabled for project: {os.getenv('ARIZE_PROJECT_NAME', 'sport-agent')}")
+            print(f"✓ View traces at: https://app.arize.com/organizations/{space_id}")
+        else:
+            print("⚠ Arize tracing disabled: ARIZE_SPACE_ID or ARIZE_API_KEY not set")
+            _TRACING = False
+    except Exception as e:
+        print(f"⚠ Failed to initialize Arize tracing: {e}")
+        _TRACING = False
 
 
 # Startup and Shutdown Events
@@ -1127,15 +1245,41 @@ def generate_digest(req: DigestRequest):
         "tool_calls": [],
     }
     
-    # Add session and user tracking attributes to the trace
-    attrs_kwargs = {"user_id": user_id}
-    
+    # Enhanced tracing with comprehensive metadata
     if _TRACING:
-        with using_attributes(**attrs_kwargs):
+        # Extract user preferences for span attributes
+        teams = prefs.get("teams", [])
+        leagues = prefs.get("leagues", [])
+        players = prefs.get("players", [])
+        timezone = prefs.get("timezone", "Unknown")
+        
+        with using_attributes(tags=["digest_generation", "multi_agent"]):
             current_span = trace.get_current_span()
-            if current_span:
-                current_span.set_attribute("user_id", user_id)
+            if current_span and current_span.is_recording():
+                # Set comprehensive span attributes for Arize visualization
+                current_span.set_attribute("user.id", user_id)
+                current_span.set_attribute("session.id", user_id)
+                current_span.set_attribute("workflow.type", "multi_agent_digest")
+                current_span.set_attribute("workflow.name", "sport_digest_generation")
+                current_span.set_attribute("agent.graph", "parallel_execution")
+                current_span.set_attribute("preferences.teams", ",".join(teams) if teams else "none")
+                current_span.set_attribute("preferences.leagues", ",".join(leagues) if leagues else "none")
+                current_span.set_attribute("preferences.players", ",".join(players) if players else "none")
+                current_span.set_attribute("preferences.timezone", timezone)
+                current_span.set_attribute("preferences.num_teams", len(teams))
+                current_span.set_attribute("preferences.num_leagues", len(leagues))
+                current_span.set_attribute("preferences.num_players", len(players))
+                
             out = graph.invoke(state)
+            
+            # Add output metrics to span
+            if current_span and current_span.is_recording():
+                digest = out.get("final_digest", "")
+                tool_calls = out.get("tool_calls", [])
+                current_span.set_attribute("output.digest_length", len(digest))
+                current_span.set_attribute("output.tool_calls_count", len(tool_calls))
+                current_span.set_attribute("output.success", True)
+                current_span.set_status(Status(StatusCode.OK))
     else:
         out = graph.invoke(state)
     

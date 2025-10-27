@@ -55,8 +55,41 @@ A **production-ready multi-agent system** for personalized daily sports digests.
                     │   + Scheduled Delivery  │
                     └─────────────────────────┘
 
-All agents, tools, and LLM calls → Arize Observability Platform
+All agents, tools, and LLM calls → Arize AX Observability
 ```
+
+## 🔍 Observability with Arize AX
+
+This system includes comprehensive **Arize AX** (NOT Phoenix) observability for production monitoring and debugging:
+
+### What's Traced
+- ✅ **Multi-Agent Execution**: Visualize parallel agent execution with detailed timelines
+- ✅ **LLM Calls**: All prompts, responses, token usage, and latency
+- ✅ **Tool Calls**: Every tool invocation with arguments and results
+- ✅ **User Context**: Track teams, leagues, players, and preferences
+- ✅ **Prompt Versioning**: Version and compare prompt templates
+
+### Quick Setup
+
+1. **Get Arize Credentials** (sign up at https://app.arize.com)
+2. **Add to `.env`**:
+   ```bash
+   ARIZE_SPACE_ID=your-space-id
+   ARIZE_API_KEY=your-api-key
+   ```
+3. **Start Server** - Tracing auto-enabled!
+4. **View Traces** at https://app.arize.com
+
+See [`ARIZE_QUICK_START.md`](ARIZE_QUICK_START.md) for detailed setup or [`ARIZE_AX_SETUP.md`](ARIZE_AX_SETUP.md) for comprehensive documentation.
+
+### Test Tracing
+
+```bash
+cd backend
+python test_arize_tracing.py
+```
+
+**Note**: Tracing is optional - system works perfectly without it!
 
 ## Key Features
 
@@ -98,11 +131,11 @@ Create `backend/.env` file:
 OPENAI_API_KEY=your_openai_api_key_here
 # OR
 OPENROUTER_API_KEY=your_openrouter_api_key_here
-OPENROUTER_MODEL=openai/gpt-4o-mini
 
-# Optional - Observability
+# Optional - Arize AX Observability (recommended)
 ARIZE_SPACE_ID=your_arize_space_id
 ARIZE_API_KEY=your_arize_api_key
+ARIZE_PROJECT_NAME=sport-agent
 ```
 
 ### 3) Install dependencies
