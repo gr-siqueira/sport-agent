@@ -6,6 +6,7 @@ from typing import Optional, List, Dict, Any
 import os
 import uuid
 import json
+import httpx
 from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv, find_dotenv
@@ -58,8 +59,8 @@ class SportPreferencesRequest(BaseModel):
     teams: List[str]
     players: Optional[List[str]] = []
     leagues: List[str]
-    delivery_time: str = "07:00"
-    timezone: str = "America/Los_Angeles"
+    delivery_time: str = "08:00"
+    timezone: str = "America/Sao_Paulo"
     user_id: Optional[str] = None
 
 
@@ -142,12 +143,265 @@ def _with_prefix(prefix: str, summary: str) -> str:
     return _compact(text)
 
 
+# Web Search Integration
+def _search_web(query: str, max_results: int = 3) -> Optional[str]:
+    """Search web for sports information using Tavily or SerpAPI."""
+    tavily_key = os.getenv("TAVILY_API_KEY")
+    
+    if tavily_key:
+        try:
+            from tavily import TavilyClient
+            client = TavilyClient(api_key=tavily_key)
+            response = client.search(query, max_results=max_results)
+            if response and response.get("results"):
+                # Concatenate top results
+                results = []
+                for r in response["results"][:max_results]:
+                    content = r.get("content", "")
+                    if content:
+                        results.append(content)
+                return " ".join(results) if results else None
+        except Exception as e:
+            print(f"Tavily search error: {e}")
+    
+    return None
+
+
+# Sports API Integration Functions
+def _fetch_api_football(endpoint: str, params: Dict[str, Any]) -> Optional[Dict]:
+    """Fetch from API-Football (free tier: 100 requests/day)."""
+    api_key = os.getenv("API_FOOTBALL_KEY")
+    if not api_key:
+        return None
+    
+    url = f"https://v3.football.api-sports.io/{endpoint}"
+    headers = {"x-apisports-key": api_key}
+    
+    try:
+        response = httpx.get(url, headers=headers, params=params, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("response"):
+                return data
+    except Exception as e:
+        print(f"API-Football error: {e}")
+    
+    return None
+
+
+def _fetch_ergast_f1(endpoint: str) -> Optional[Dict]:
+    """Fetch from Ergast F1 API (completely free, no key needed)."""
+    url = f"http://ergast.com/api/f1/{endpoint}.json"
+    
+    try:
+        response = httpx.get(url, timeout=10)
+        if response.status_code == 200:
+            return response.json()
+    except Exception as e:
+        print(f"Ergast F1 error: {e}")
+    
+    return None
+
+
+def _fetch_thesportsdb(endpoint: str) -> Optional[Dict]:
+    """Fetch from TheSportsDB (free tier available)."""
+    api_key = os.getenv("THESPORTSDB_KEY", "3")  # "3" is free test key
+    base_url = f"https://www.thesportsdb.com/api/v1/json/{api_key}"
+    
+    url = f"{base_url}/{endpoint}"
+    
+    try:
+        response = httpx.get(url, timeout=10)
+        if response.status_code == 200:
+            return response.json()
+    except Exception as e:
+        print(f"TheSportsDB error: {e}")
+    
+    return None
+
+
+# Sport Classification
+def _classify_sport(teams: List[str], leagues: List[str]) -> Dict[str, List[str]]:
+    """Classify teams/leagues into sport categories."""
+    football_keywords = ["FC", "United", "City", "Real", "Barcelona", "Premier League", 
+                         "La Liga", "Serie A", "Bundesliga", "Champions League", "Brasileirão",
+                         "Brasileirao", "Palmeiras", "Flamengo", "Corinthians", "São Paulo",
+                         "Sao Paulo", "Santos", "Athletico", "Internacional", "Grêmio"]
+    tennis_keywords = ["ATP", "WTA", "Grand Slam", "Wimbledon", "US Open", "French Open",
+                       "Australian Open", "Roland Garros", "Tennis"]
+    f1_keywords = ["Formula", "F1", "Grand Prix", "Ferrari", "Mercedes", "Red Bull Racing",
+                   "McLaren", "Verstappen", "Hamilton", "Leclerc"]
+    
+    sports = {"football": [], "tennis": [], "f1": []}
+    all_items = teams + leagues
+    
+    for item in all_items:
+        item_lower = item.lower()
+        if any(kw.lower() in item_lower for kw in f1_keywords):
+            sports["f1"].append(item)
+        elif any(kw.lower() in item_lower for kw in tennis_keywords):
+            sports["tennis"].append(item)
+        elif any(kw.lower() in item_lower for kw in football_keywords):
+            sports["football"].append(item)
+        else:
+            # Default to football for ambiguous cases
+            sports["football"].append(item)
+    
+    return sports
+
+
+def _get_league_id(league_name: str) -> Optional[int]:
+    """Map league names to API-Football IDs."""
+    league_map = {
+        "premier league": 39,
+        "la liga": 140,
+        "serie a": 135,
+        "bundesliga": 78,
+        "ligue 1": 61,
+        "champions league": 2,
+        "brasileirão": 71,
+        "brasileirao": 71,
+        "campeonato brasileiro": 71,
+    }
+    return league_map.get(league_name.lower())
+
+
 # Sport-Specific Tools (all using LLM fallback pattern for MVP)
+
+# Specialized Tools for Enhanced UX
+
+@tool
+def national_team_info(team_name: str = "Brazil") -> str:
+    """Get info about national teams (e.g., Brazil, Argentina, etc.)."""
+    # Web search is best for national teams (real-time data)
+    query = f"{team_name} national football team latest news matches results upcoming games 2024 2025"
+    web_result = _search_web(query, max_results=5)
+    if web_result:
+        return _with_prefix(f"{team_name} National Team", web_result)
+    
+    # LLM fallback
+    instruction = f"Provide latest info about {team_name} national football team: recent matches, upcoming games, and squad news."
+    return _llm_fallback(instruction)
+
+
+@tool
+def champions_league_summary() -> str:
+    """Get comprehensive Champions League summary: standings, recent results, upcoming matches."""
+    # Try web search first (most current)
+    query = "UEFA Champions League 2024-25 standings table recent results upcoming matches"
+    web_result = _search_web(query, max_results=8)
+    if web_result:
+        return _with_prefix("Champions League", web_result)
+    
+    # Try API-Football for today's fixtures
+    from datetime import datetime
+    today = datetime.now().strftime("%Y-%m-%d")
+    
+    data = _fetch_api_football("fixtures", {
+        "league": "2",  # Champions League ID
+        "date": today,
+        "season": "2024"
+    })
+    
+    if data and data.get("response"):
+        results = []
+        for match in data["response"][:5]:
+            home = match["teams"]["home"]["name"]
+            away = match["teams"]["away"]["name"]
+            time = match["fixture"]["date"][11:16]
+            results.append(f"{home} vs {away} ({time})")
+        if results:
+            return _compact("Champions League today: " + "; ".join(results), limit=300)
+    
+    # LLM fallback
+    instruction = "Provide Champions League summary: current standings (top 8 teams), recent key results, and upcoming important matches."
+    return _llm_fallback(instruction)
+
+
+@tool
+def tennis_player_info(player_name: str, include_ranking: bool = True) -> str:
+    """Get tennis player information: recent matches, upcoming tournaments, ranking."""
+    # Web search is best for tennis (real-time tournament data)
+    query = f"{player_name} tennis latest match results next tournament 2024 2025 ATP WTA ranking"
+    web_result = _search_web(query, max_results=5)
+    if web_result:
+        return _with_prefix(f"{player_name} (Tennis)", web_result)
+    
+    # LLM fallback
+    instruction = f"Provide info about tennis player {player_name}: recent match results, upcoming tournament, current ATP/WTA ranking."
+    return _llm_fallback(instruction)
+
+
+@tool
+def brasileirao_summary() -> str:
+    """Get Brasileirão (Brazilian league) summary with standings and recent results."""
+    # Try API-Football first
+    data = _fetch_api_football("standings", {
+        "league": "71",  # Brasileirão ID
+        "season": "2024"
+    })
+    
+    if data and data.get("response"):
+        standings = data["response"][0]["league"]["standings"][0][:8]
+        results = []
+        for team in standings:
+            results.append(f"{team['rank']}. {team['team']['name']} ({team['points']}pts)")
+        if results:
+            return _compact("Brasileirão 2024: " + "; ".join(results), limit=300)
+    
+    # Web search fallback
+    query = "Brasileirão 2024 tabela classificação resultados recentes"
+    web_result = _search_web(query, max_results=5)
+    if web_result:
+        return _with_prefix("Brasileirão", web_result)
+    
+    # LLM fallback
+    instruction = "Provide Brasileirão 2024 standings (top 8 teams) with points and recent key results."
+    return _llm_fallback(instruction)
 
 @tool
 def upcoming_games(teams: List[str], date: str = "today") -> str:
     """Get upcoming games for specified teams."""
     teams_str = ", ".join(teams)
+    sports = _classify_sport(teams, [])
+    
+    # Try API-Football for soccer teams
+    if sports["football"]:
+        for team in sports["football"]:
+            data = _fetch_api_football("fixtures", {
+                "team": team,
+                "next": 3,
+                "timezone": "America/Los_Angeles"
+            })
+            if data and data.get("response"):
+                fixtures = data["response"][:3]
+                results = []
+                for f in fixtures:
+                    home = f["teams"]["home"]["name"]
+                    away = f["teams"]["away"]["name"]
+                    match_date = f["fixture"]["date"][:10]  # Just date
+                    venue = f["fixture"]["venue"]["name"]
+                    results.append(f"{home} vs {away} at {venue} on {match_date}")
+                if results:
+                    return _compact("; ".join(results), limit=250)
+    
+    # Try F1 API for Formula 1
+    if sports["f1"]:
+        data = _fetch_ergast_f1("current/next")
+        if data:
+            races = data.get("MRData", {}).get("RaceTable", {}).get("Races", [])
+            if races:
+                race = races[0]
+                info = f"Next F1: {race['raceName']} at {race['Circuit']['circuitName']}, {race['date']}"
+                return _compact(info)
+    
+    # Fallback to web search
+    query = f"upcoming games schedule {teams_str} {date}"
+    web_result = _search_web(query)
+    if web_result:
+        return _with_prefix("Schedule", web_result)
+    
+    # Final LLM fallback
     instruction = f"List upcoming games for {teams_str} on {date}. Include opponent, time, and TV channel."
     return _llm_fallback(instruction)
 
@@ -170,6 +424,46 @@ def tv_schedule(games: str) -> str:
 def recent_results(teams: List[str], lookback_days: int = 1) -> str:
     """Get recent game results for teams."""
     teams_str = ", ".join(teams)
+    sports = _classify_sport(teams, [])
+    
+    # Try API-Football for soccer
+    if sports["football"]:
+        for team in sports["football"]:
+            data = _fetch_api_football("fixtures", {
+                "team": team,
+                "last": min(lookback_days, 5),
+                "status": "FT"
+            })
+            if data and data.get("response"):
+                results = []
+                for match in data["response"][:3]:
+                    home = match["teams"]["home"]["name"]
+                    away = match["teams"]["away"]["name"]
+                    score_home = match["goals"]["home"]
+                    score_away = match["goals"]["away"]
+                    score = f"{score_home}-{score_away}"
+                    results.append(f"{home} {score} {away}")
+                if results:
+                    return _compact("; ".join(results), limit=250)
+    
+    # Try F1 results
+    if sports["f1"]:
+        data = _fetch_ergast_f1("current/last/results")
+        if data:
+            results_data = data.get("MRData", {}).get("RaceTable", {}).get("Races", [])
+            if results_data:
+                race = results_data[0]
+                winner = race["Results"][0]["Driver"]
+                info = f"Latest F1: {race['raceName']} - Winner: {winner['givenName']} {winner['familyName']}"
+                return _compact(info)
+    
+    # Web search fallback
+    query = f"recent results scores {teams_str} last {lookback_days} days"
+    web_result = _search_web(query)
+    if web_result:
+        return _with_prefix("Recent results", web_result)
+    
+    # LLM fallback
     instruction = f"Provide scores and brief highlights for {teams_str} games in the last {lookback_days} day(s)."
     return _llm_fallback(instruction)
 
@@ -186,6 +480,43 @@ def live_scores(leagues: List[str]) -> str:
 def team_standings(leagues: List[str]) -> str:
     """Get current league standings."""
     leagues_str = ", ".join(leagues)
+    sports = _classify_sport([], leagues)
+    
+    # Try API-Football for soccer
+    if sports["football"]:
+        for league in sports["football"]:
+            league_id = _get_league_id(league)
+            if league_id:
+                data = _fetch_api_football("standings", {
+                    "league": league_id,
+                    "season": 2024
+                })
+                if data and data.get("response"):
+                    standings = data["response"][0]["league"]["standings"][0][:5]
+                    results = []
+                    for team in standings:
+                        results.append(f"{team['rank']}. {team['team']['name']} ({team['points']}pts)")
+                    if results:
+                        return _compact(f"{league}: " + "; ".join(results), limit=250)
+    
+    # Try F1 standings
+    if sports["f1"]:
+        data = _fetch_ergast_f1("current/driverStandings")
+        if data:
+            standings = data.get("MRData", {}).get("StandingsTable", {}).get("StandingsLists", [])
+            if standings:
+                drivers = standings[0]["DriverStandings"][:5]
+                results = [f"{d['position']}. {d['Driver']['givenName']} {d['Driver']['familyName']} ({d['points']}pts)" 
+                          for d in drivers]
+                return _compact("F1 Standings: " + "; ".join(results), limit=250)
+    
+    # Web search fallback
+    query = f"current standings table {leagues_str} 2024 2025"
+    web_result = _search_web(query)
+    if web_result:
+        return _with_prefix("Standings", web_result)
+    
+    # LLM fallback
     instruction = f"Provide current standings/rankings for {leagues_str}."
     return _llm_fallback(instruction)
 
@@ -194,6 +525,14 @@ def team_standings(leagues: List[str]) -> str:
 def player_news(player_names: List[str]) -> str:
     """Get latest news about specified players."""
     players_str = ", ".join(player_names)
+    
+    # Web search is best for player news (most current)
+    query = f"latest sports news {players_str} today 2024 2025"
+    web_result = _search_web(query, max_results=5)
+    if web_result:
+        return _with_prefix("Player news", web_result)
+    
+    # LLM fallback
     instruction = f"Provide latest news and updates about {players_str}."
     return _llm_fallback(instruction)
 
@@ -214,6 +553,55 @@ def player_stats(player_names: List[str]) -> str:
     return _llm_fallback(instruction)
 
 
+# Advanced Analysis Tools (Key Feature #3: Intelligent Analysis)
+
+@tool
+def matchup_analysis(team1: str, team2: str) -> str:
+    """Analyze matchup between two teams including form, head-to-head, and key players."""
+    instruction = (
+        f"Analyze the matchup between {team1} vs {team2}. Include: "
+        f"1) Recent form (last 5 games), "
+        f"2) Head-to-head record this season, "
+        f"3) Key player matchups, "
+        f"4) Tactical considerations. Keep it brief (200 chars)."
+    )
+    return _llm_fallback(instruction)
+
+
+@tool
+def playoff_implications(teams: List[str], league: str) -> str:
+    """Analyze playoff, relegation, or tournament implications for teams."""
+    teams_str = ", ".join(teams)
+    instruction = (
+        f"For {teams_str} in {league}, analyze: "
+        f"1) Current playoff/relegation standing, "
+        f"2) What's at stake in upcoming games, "
+        f"3) Magic numbers or crucial matches. Brief summary (200 chars)."
+    )
+    return _llm_fallback(instruction)
+
+
+@tool
+def detect_rivalries(games: str) -> str:
+    """Identify rivalry games and their significance."""
+    instruction = (
+        f"From these games: {games}, identify any rivalry matchups. "
+        f"Explain the rivalry's significance and history. Brief (200 chars)."
+    )
+    return _llm_fallback(instruction)
+
+
+@tool
+def must_watch_games(games: str, user_context: str = "") -> str:
+    """Rank and recommend must-watch games based on multiple factors."""
+    instruction = (
+        f"From these games: {games}, rank the top must-watch games. "
+        f"Consider: rivalry, playoff implications, star players, close matchups. "
+        f"User context: {user_context}. Provide top 3 with brief reasons (200 chars)."
+    )
+    return _llm_fallback(instruction)
+
+
 # State Management
 class SportDigestState(TypedDict):
     messages: Annotated[List[BaseMessage], operator.add]
@@ -221,6 +609,7 @@ class SportDigestState(TypedDict):
     schedule: Optional[str]
     scores: Optional[str]
     player_news: Optional[str]
+    analysis: Optional[str]  # NEW: Intelligent analysis output
     final_digest: Optional[str]
     tool_calls: Annotated[List[Dict[str, Any]], operator.add]
 
@@ -384,38 +773,236 @@ def player_agent(state: SportDigestState) -> SportDigestState:
     return {"messages": [SystemMessage(content=out)], "player_news": out, "tool_calls": calls}
 
 
+def analysis_agent(state: SportDigestState) -> SportDigestState:
+    """Agent that provides intelligent analysis: matchups, implications, rivalries, must-watch games."""
+    prefs = state["user_preferences"]
+    teams = prefs.get("teams", [])
+    leagues = prefs.get("leagues", [])
+    schedule_info = state.get("schedule", "")
+    scores_info = state.get("scores", "")
+    
+    prompt_t = (
+        "You are a sports analyst providing strategic insights.\n"
+        "Analyze upcoming games for these teams: {teams} in leagues: {leagues}.\n"
+        "Schedule context: {schedule}\n"
+        "Recent results context: {scores}\n"
+        "Provide: 1) Key matchup analysis, 2) Playoff/relegation implications, "
+        "3) Rivalry games, 4) Must-watch recommendations.\n"
+        "Use the analysis tools to provide insights."
+    )
+    vars_ = {
+        "teams": ", ".join(teams),
+        "leagues": ", ".join(leagues),
+        "schedule": schedule_info[:300],
+        "scores": scores_info[:300]
+    }
+    
+    messages = [SystemMessage(content=prompt_t.format(**vars_))]
+    tools = [matchup_analysis, playoff_implications, detect_rivalries, must_watch_games]
+    agent = llm.bind_tools(tools)
+    
+    calls: List[Dict[str, Any]] = []
+    
+    with using_attributes(tags=["analysis", "intelligence"]):
+        if _TRACING:
+            current_span = trace.get_current_span()
+            if current_span:
+                current_span.set_attribute("metadata.agent_type", "analysis")
+                current_span.set_attribute("metadata.agent_node", "analysis_agent")
+        
+        with using_prompt_template(template=prompt_t, variables=vars_, version="v1"):
+            res = agent.invoke(messages)
+    
+    if getattr(res, "tool_calls", None):
+        for c in res.tool_calls:
+            calls.append({"agent": "analysis", "tool": c["name"], "args": c.get("args", {})})
+        
+        tool_node = ToolNode(tools)
+        tr = tool_node.invoke({"messages": [res]})
+        
+        messages.append(res)
+        messages.extend(tr["messages"])
+        
+        synthesis_prompt = (
+            "Synthesize the analysis into key insights: "
+            "1) Most important matchups, 2) Playoff implications, "
+            "3) Rivalry alerts, 4) Top must-watch games."
+        )
+        messages.append(SystemMessage(content=synthesis_prompt))
+        
+        with using_prompt_template(template=synthesis_prompt, variables=vars_, version="v1-synthesis"):
+            final_res = llm.invoke(messages)
+        out = final_res.content
+    else:
+        out = res.content
+
+    return {"messages": [SystemMessage(content=out)], "analysis": out, "tool_calls": calls}
+
+
+# Helper Functions for Digest Sections
+
+def _extract_team_info(team_name: str, text: str) -> str:
+    """Extract team-specific information from text."""
+    if not text or not team_name:
+        return ""
+    
+    # Simple extraction: find sentences containing team name
+    sentences = text.split('.')
+    relevant = [s.strip() for s in sentences if team_name.lower() in s.lower()]
+    return '. '.join(relevant[:2]) + '.' if relevant else ""
+
+
+def _build_football_section(teams: List[str], leagues: List[str], schedule: str, scores: str, analysis: str) -> str:
+    """Build organized football section with teams and leagues."""
+    if not teams and not leagues:
+        return ""
+    
+    section = "⚽ **FUTEBOL**\n"
+    section += "=" * 70 + "\n\n"
+    
+    # Individual teams
+    for team in teams:
+        section += f"### {team}\n"
+        
+        # Extract team-specific data
+        team_schedule = _extract_team_info(team, schedule)
+        team_scores = _extract_team_info(team, scores)
+        
+        if team_scores:
+            section += f"📊 Resultados recentes: {team_scores}\n"
+        if team_schedule:
+            section += f"📅 Próximos jogos: {team_schedule}\n"
+        section += "\n"
+    
+    # Champions League special section
+    if any("Champions" in l for l in leagues):
+        section += "### 🏆 UEFA Champions League\n"
+        cl_info = _extract_team_info("Champions", scores + " " + schedule + " " + analysis)
+        if cl_info:
+            section += f"{cl_info}\n"
+        section += "\n"
+    
+    # Brasileirão section
+    if any("Brasileir" in l for l in leagues):
+        section += "### 🇧🇷 Brasileirão\n"
+        br_info = _extract_team_info("Brasileir", scores + " " + schedule)
+        if br_info:
+            section += f"{br_info}\n"
+        section += "\n"
+    
+    return section
+
+
+def _is_tennis_player(player_name: str) -> bool:
+    """Check if a player is a tennis player based on name patterns."""
+    tennis_keywords = ["fonseca", "djokovic", "nadal", "federer", "alcaraz", "sinner"]
+    return any(kw in player_name.lower() for kw in tennis_keywords)
+
+
+def _build_tennis_section(players: List[str], player_news: str) -> str:
+    """Build tennis section with player info."""
+    if not players:
+        return ""
+    
+    section = "🎾 **TÊNIS**\n"
+    section += "=" * 70 + "\n\n"
+    
+    for player in players:
+        if _is_tennis_player(player) or "tennis" in player.lower():
+            section += f"### {player}\n"
+            player_info = _extract_team_info(player, player_news)
+            if player_info:
+                section += f"{player_info}\n"
+            else:
+                section += "Informações não disponíveis no momento.\n"
+            section += "\n"
+    
+    return section
+
+
+def _build_f1_section(schedule: str, scores: str) -> str:
+    """Build F1 section with races and standings."""
+    # Check if F1 data exists
+    if not ("F1" in schedule or "F1" in scores or "Formula" in schedule or "Formula" in scores):
+        return ""
+    
+    section = "🏎️ **FÓRMULA 1**\n"
+    section += "=" * 70 + "\n\n"
+    
+    # Extract F1 info
+    f1_schedule = _extract_team_info("F1", schedule) or _extract_team_info("Formula", schedule)
+    f1_scores = _extract_team_info("F1", scores) or _extract_team_info("Formula", scores)
+    
+    if f1_scores:
+        section += f"🏁 Última corrida:\n{f1_scores}\n\n"
+    
+    if f1_schedule:
+        section += f"📅 Próxima corrida:\n{f1_schedule}\n\n"
+    
+    if not f1_scores and not f1_schedule:
+        section += "Informações de Fórmula 1 não disponíveis no momento.\n\n"
+    
+    return section
+
+
 def digest_agent(state: SportDigestState) -> SportDigestState:
-    """Agent that synthesizes all information into a formatted digest."""
+    """Agent that creates sport-specific organized digest."""
     prefs = state["user_preferences"]
     teams = prefs.get("teams", [])
     players = prefs.get("players", [])
+    leagues = prefs.get("leagues", [])
     
-    prompt_parts = [
-        "Create a daily sports digest for a fan following:",
-        "Teams: {teams}",
-        "Players: {players}",
-        "",
-        "Information gathered:",
-        "Schedule: {schedule}",
-        "Scores: {scores}",
-        "Player News: {player_news}",
-        "",
-        "Format the digest with clear sections:",
-        "1. YESTERDAY'S RESULTS",
-        "2. TODAY'S SCHEDULE",
-        "3. PLAYER NEWS",
-        "",
-        "Use emojis and make it engaging but concise."
-    ]
+    # Get data from other agents
+    schedule = state.get("schedule", "")
+    scores = state.get("scores", "")
+    player_news = state.get("player_news", "")
+    analysis = state.get("analysis", "")
     
-    prompt_t = "\n".join(prompt_parts)
-    vars_ = {
-        "teams": ", ".join(teams),
-        "players": ", ".join(players) if players else "none",
-        "schedule": (state.get("schedule") or "")[:400],
-        "scores": (state.get("scores") or "")[:400],
-        "player_news": (state.get("player_news") or "")[:400],
-    }
+    # Classify sports
+    sports = _classify_sport(teams, leagues)
+    
+    # Build sport-specific sections
+    sections = []
+    
+    # Football Section (includes teams and leagues)
+    if sports["football"] or any(l in ["Champions League", "Brasileirão", "Premier League"] for l in leagues):
+        football_section = _build_football_section(
+            teams=sports["football"] + [t for t in teams if t not in sports["football"] and t not in sports["tennis"] and t not in sports["f1"]],
+            leagues=leagues,
+            schedule=schedule,
+            scores=scores,
+            analysis=analysis
+        )
+        if football_section:
+            sections.append(football_section)
+    
+    # Tennis Section
+    tennis_players = [p for p in players if _is_tennis_player(p)]
+    if tennis_players or sports["tennis"]:
+        tennis_section = _build_tennis_section(
+            players=tennis_players,
+            player_news=player_news
+        )
+        if tennis_section:
+            sections.append(tennis_section)
+    
+    # F1 Section
+    if sports["f1"] or "F1" in str(teams) or "Formula" in str(teams):
+        f1_section = _build_f1_section(
+            schedule=schedule,
+            scores=scores
+        )
+        if f1_section:
+            sections.append(f1_section)
+    
+    # If sections were built, combine them
+    if sections:
+        digest = "\n\n".join(sections)
+    else:
+        # Fallback to simple format if no sections
+        digest = f"📊 RESULTADOS RECENTES\n{scores[:300]}\n\n"
+        digest += f"📅 PRÓXIMOS JOGOS\n{schedule[:300]}\n\n"
+        digest += f"🗞️ NOTÍCIAS\n{player_news[:300]}"
     
     with using_attributes(tags=["digest", "synthesis"]):
         if _TRACING:
@@ -423,11 +1010,8 @@ def digest_agent(state: SportDigestState) -> SportDigestState:
             if current_span:
                 current_span.set_attribute("metadata.agent_type", "digest")
                 current_span.set_attribute("metadata.agent_node", "digest_agent")
-        
-        with using_prompt_template(template=prompt_t, variables=vars_, version="v1"):
-            res = llm.invoke([SystemMessage(content=prompt_t.format(**vars_))])
     
-    return {"messages": [SystemMessage(content=res.content)], "final_digest": res.content}
+    return {"messages": [SystemMessage(content=digest)], "final_digest": digest}
 
 
 def build_graph():
@@ -436,17 +1020,20 @@ def build_graph():
     g.add_node("schedule_node", schedule_agent)
     g.add_node("scores_node", scores_agent)
     g.add_node("player_node", player_agent)
+    g.add_node("analysis_node", analysis_agent)  # NEW: Intelligent analysis
     g.add_node("digest_node", digest_agent)
 
-    # Run schedule, scores, and player agents in parallel
+    # Run all 4 agents in parallel (schedule, scores, player, analysis)
     g.add_edge(START, "schedule_node")
     g.add_edge(START, "scores_node")
     g.add_edge(START, "player_node")
+    g.add_edge(START, "analysis_node")  # NEW: Analysis runs in parallel
     
-    # All three agents feed into the digest agent
+    # All four agents feed into the digest agent
     g.add_edge("schedule_node", "digest_node")
     g.add_edge("scores_node", "digest_node")
     g.add_edge("player_node", "digest_node")
+    g.add_edge("analysis_node", "digest_node")  # NEW: Analysis feeds into digest
     
     g.add_edge("digest_node", END)
 

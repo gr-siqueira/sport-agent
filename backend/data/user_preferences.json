@@ -20,6 +20,71 @@
           "timestamp": "2025-10-19T19:08:14.790900"
         }
       ]
+    },
+    "a49dc3b1-3ba1-4e37-af12-d0326776530c": {
+      "teams": [
+        "Lakers",
+        "Flamengo"
+      ],
+      "players": [
+        "LeBron James"
+      ],
+      "leagues": [
+        "NBA",
+        "Brasileir\u00e3o"
+      ],
+      "delivery_time": "07:00",
+      "timezone": "America/Sao_Paulo",
+      "user_id": "a49dc3b1-3ba1-4e37-af12-d0326776530c"
+    },
+    "de533d55-7d70-4eb6-9001-78305a779ac2": {
+      "teams": [
+        "S\u00e3o Paulo FC",
+        "Manchester City"
+      ],
+      "players": [
+        "Jo\u00e3o Fonseca"
+      ],
+      "leagues": [
+        "Champions League"
+      ],
+      "delivery_time": "07:00",
+      "timezone": "America/Sao_Paulo",
+      "user_id": "de533d55-7d70-4eb6-9001-78305a779ac2",
+      "digest_history": [
+        {
+          "digest": "\u26bd **FUTEBOL**\n======================================================================\n\n### S\u00e3o Paulo FC\n\ud83d\udcca Resultados recentes: In a recent Division One League match, Manchester City faced S\u00e3o Paulo FC, resulting in a thrilling 4-4 draw. Both teams showcased strong performances with Manchester City lining up in a 4-4-2 formation and S\u00e3o Paulo FC in a 5-3-2 formation under caretaker manager Daniel Perry.\n\ud83d\udcc5 Pr\u00f3ximos jogos: S\u00e3o Paulo FC will play against Rio de Janeiro in the Ta\u00e7a das Favelas at 7:00 PM UTC. Please note that the game times for S\u00e3o Paulo FC remain the same in America/Sao_Paulo timezone, while Manchester City game times are typically converted to Brazil time for broadcast.\n\n### Manchester City\n\ud83d\udcca Resultados recentes: In a recent Division One League match, Manchester City faced S\u00e3o Paulo FC, resulting in a thrilling 4-4 draw. Both teams showcased strong performances with Manchester City lining up in a 4-4-2 formation and S\u00e3o Paulo FC in a 5-3-2 formation under caretaker manager Daniel Perry.\n\ud83d\udcc5 Pr\u00f3ximos jogos: Please note that the game times for S\u00e3o Paulo FC remain the same in America/Sao_Paulo timezone, while Manchester City game times are typically converted to Brazil time for broadcast.\n\n### Champions League\n\ud83d\udcca Resultados recentes: In the Champions League standings, as of now, the top eight teams include Liverpool, Barcelona, Atl\u00e9tico Madrid, Atalanta, Arsenal, Bayer Leverkusen, and Paris SG leading the table.\n\n### \ud83c\udfc6 UEFA Champions League\nIn the Champions League standings, as of now, the top eight teams include Liverpool, Barcelona, Atl\u00e9tico Madrid, Atalanta, Arsenal, Bayer Leverkusen, and Paris SG leading the table. 2) Playoff Implications: S\u00e3o Paulo FC needs a strong defensive strategy against Manchester City's attacking depth to secure a positive result and potentially advance in the Champions League.\n\n\n\n\ud83c\udfbe **T\u00caNIS**\n======================================================================\n\n### Jo\u00e3o Fonseca\n- **Player News**: Jo\u00e3o Fonseca, a 19-year-old Brazilian tennis player, has had a memorable 2025 campaign and is considered one of tennis's brightest young stars.\n\n",
+          "timestamp": "2025-10-27T19:07:31.783616"
+        }
+      ]
+    },
+    "test-user-brasil": {
+      "teams": [
+        "S\u00e3o Paulo FC",
+        "Sele\u00e7\u00e3o Brasileira",
+        "Ferrari"
+      ],
+      "players": [
+        "Jo\u00e3o Fonseca"
+      ],
+      "leagues": [
+        "Champions League",
+        "Brasileir\u00e3o",
+        "Formula 1"
+      ],
+      "delivery_time": "08:00",
+      "timezone": "America/Sao_Paulo",
+      "user_id": "test-user-brasil",
+      "digest_history": [
+        {
+          "digest": "\u26bd **FUTEBOL**\n======================================================================\n\n### S\u00e3o Paulo FC\n\ud83d\udcca Resultados recentes: Here are the recent results and standings for the requested teams and leagues:\n\nRecent Results:\n- S\u00e3o Paulo FC: Latest results and scores can be found on Flashscore.\n\ud83d\udcc5 Pr\u00f3ximos jogos: **S\u00e3o Paulo FC**:\n   - Next Match: S\u00e3o Paulo vs.\n\n### Sele\u00e7\u00e3o Brasileira\n\ud83d\udcca Resultados recentes: - Sele\u00e7\u00e3o Brasileira: No specific recent results available.\n\ud83d\udcc5 Pr\u00f3ximos jogos: **Sele\u00e7\u00e3o Brasileira**:\n   - Next Match: No upcoming matches today\n   - TV Broadcast: Tune into ESPN, Fox Sports, or Globo for matches.\n\n### Champions League\n\ud83d\udcca Resultados recentes: Key Results:\n- Champions League: Juventus lost to Chelsea (0-1), Villarreal drew with Manchester United (0-0).\n\n### Brasileir\u00e3o\n\ud83d\udcca Resultados recentes: - Brasileir\u00e3o: Flamengo defeated Cuiab\u00e1 (1-0). Standings:\n- Brasileir\u00e3o:\n  1.\n\n### \ud83c\udfc6 UEFA Champions League\nKey Results:\n- Champions League: Juventus lost to Chelsea (0-1), Villarreal drew with Manchester United (0-0).\n\n### \ud83c\udde7\ud83c\uddf7 Brasileir\u00e3o\n- Sele\u00e7\u00e3o Brasileira: No specific recent results available. - Brasileir\u00e3o: Flamengo defeated Cuiab\u00e1 (1-0).\n\n\n\n\ud83c\udfbe **T\u00caNIS**\n======================================================================\n\n### Jo\u00e3o Fonseca\n- **Player News**: Jo\u00e3o Fonseca, a 19-year-old Brazilian tennis player, has had a memorable 2025 campaign and recently made a big breakthrough in his career. These updates indicate that Jo\u00e3o Fonseca is progressing well in his tennis career, while the mentioned teams do not have any significant injuries affecting their squads currently.\n\n\n\n\ud83c\udfce\ufe0f **F\u00d3RMULA 1**\n======================================================================\n\n\ud83c\udfc1 \u00daltima corrida:\n- Ferrari: No recent races in Formula 1.\n\n\ud83d\udcc5 Pr\u00f3xima corrida:\n**Ferrari**:\n   - Next Race: Ferrari race at 2:30 PM in America/Los_Angeles timezone\n   - TV Broadcast: Watch Formula 1 races on ESPN or F1 TV Pro for exclusive coverage.\n\n",
+          "timestamp": "2025-10-27T19:04:54.432283"
+        },
+        {
+          "digest": "\u26bd **FUTEBOL**\n======================================================================\n\n### S\u00e3o Paulo FC\n\ud83d\udcca Resultados recentes: Here are the recent results and standings:\n\n**Recent Results:**\n- **S\u00e3o Paulo FC:** For the latest scores and results of S\u00e3o Paulo FC, you can check Flashscore.\n\ud83d\udcc5 Pr\u00f3ximos jogos: S\u00e3o Paulo FC:\n   - Today's match against Bahia on 25th October 2025.\n\n### Sele\u00e7\u00e3o Brasileira\n\ud83d\udcca Resultados recentes: - **Sele\u00e7\u00e3o Brasileira:** No specific results were retrieved for Sele\u00e7\u00e3o Brasileira within the past day.\n\ud83d\udcc5 Pr\u00f3ximos jogos: Sele\u00e7\u00e3o Brasileira:\n   - I apologize, but I couldn't retrieve the upcoming games for Sele\u00e7\u00e3o Brasileira.\n\n### Champions League\n\ud83d\udcca Resultados recentes: **Standings:**\n- **Champions League:** Standings are not available at the moment.\n\n### Brasileir\u00e3o\n\ud83d\udcca Resultados recentes: - **Brasileir\u00e3o:** In the Brasileir\u00e3o S\u00e9rie A 2025, the current standings are:\n   1.\n\n### \ud83c\udfc6 UEFA Champions League\n**Standings:**\n- **Champions League:** Standings are not available at the moment. Ferrari: Strong performances in the upcoming races will be crucial for their standing in the Formula 1 championship.\n\n### \ud83c\udde7\ud83c\uddf7 Brasileir\u00e3o\n- **Sele\u00e7\u00e3o Brasileira:** No specific results were retrieved for Sele\u00e7\u00e3o Brasileira within the past day. - **Brasileir\u00e3o:** In the Brasileir\u00e3o S\u00e9rie A 2025, the current standings are:\n   1.\n\n\n\n\ud83c\udfbe **T\u00caNIS**\n======================================================================\n\n### Jo\u00e3o Fonseca\n- **Player news for Jo\u00e3o Fonseca:** Fonseca has made a significant breakthrough in the rankings, soaring from No.\n\n\n\n\ud83c\udfce\ufe0f **F\u00d3RMULA 1**\n======================================================================\n\n\ud83c\udfc1 \u00daltima corrida:\nPalmeiras\n   (Standings: Team, P, W, D, L, F, A, GD, PTS)\n- **Formula 1:** Standings are not available at the moment.\n\n",
+          "timestamp": "2025-10-27T19:05:16.769095"
+        }
+      ]
     }
   }
 }

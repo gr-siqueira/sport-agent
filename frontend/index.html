@@ -8,6 +8,61 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    /* Sport-specific section styling */
+    .sport-section {
+      margin-bottom: 1.5rem;
+      padding: 1.5rem;
+      border-radius: 0.75rem;
+      border-left: 4px solid;
+      background: white;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    
+    .sport-section.football {
+      border-color: #22c55e;
+      background: linear-gradient(to right, #f0fdf4, #ffffff);
+    }
+    
+    .sport-section.tennis {
+      border-color: #eab308;
+      background: linear-gradient(to right, #fefce8, #ffffff);
+    }
+    
+    .sport-section.f1 {
+      border-color: #ef4444;
+      background: linear-gradient(to right, #fef2f2, #ffffff);
+    }
+    
+    .sport-section h3 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 0.75rem;
+      color: #1f2937;
+    }
+    
+    .sport-section h2 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 1rem;
+      color: #111827;
+    }
+    
+    .match-info {
+      margin: 0.5rem 0;
+      padding: 0.75rem;
+      background: rgba(255,255,255,0.5);
+      border-radius: 0.5rem;
+      font-size: 0.95rem;
+      line-height: 1.6;
+    }
+    
+    .digest-content pre {
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      font-family: inherit;
+    }
+  </style>
 </head>
 <body class="bg-slate-100 text-neutral-900 antialiased font-[Inter]">
   <!-- Nav -->
@@ -178,6 +233,7 @@
             <label for="timezone" class="block text-sm font-medium text-neutral-800">Timezone</label>
             <select id="timezone" required
                     class="mt-2 w-full rounded-lg border border-neutral-300 bg-white px-3.5 py-2.5 text-neutral-900 shadow-sm outline-none ring-0 focus:border-neutral-400 focus:ring-2 focus:ring-neutral-200">
+              <option value="America/Sao_Paulo">🇧🇷 Brasil (Brasília)</option>
               <option value="America/Los_Angeles">Pacific Time (PT)</option>
               <option value="America/Denver">Mountain Time (MT)</option>
               <option value="America/Chicago">Central Time (CT)</option>
@@ -369,6 +425,52 @@
       }
     }
 
+    // Format digest by sport sections
+    function formatDigestBySport(digest) {
+      // Split by sport sections
+      let formatted = digest;
+      
+      // Detect and wrap football section
+      if (formatted.includes('⚽') || formatted.includes('FUTEBOL')) {
+        formatted = formatted.replace(
+          /(⚽\s*\*\*FUTEBOL\*\*[\s\S]*?)(?=🎾|🏎️|$)/,
+          '<div class="sport-section football">$1</div>'
+        );
+      }
+      
+      // Detect and wrap tennis section
+      if (formatted.includes('🎾') || formatted.includes('TÊNIS')) {
+        formatted = formatted.replace(
+          /(🎾\s*\*\*TÊNIS\*\*[\s\S]*?)(?=🏎️|$)/,
+          '<div class="sport-section tennis">$1</div>'
+        );
+      }
+      
+      // Detect and wrap F1 section
+      if (formatted.includes('🏎️') || formatted.includes('FÓRMULA 1')) {
+        formatted = formatted.replace(
+          /(🏎️\s*\*\*FÓRMULA 1\*\*[\s\S]*?)$/,
+          '<div class="sport-section f1">$1</div>'
+        );
+      }
+      
+      // Convert markdown-style formatting to HTML
+      formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+      formatted = formatted.replace(/###\s+(.+)/g, '<h3>$1</h3>');
+      formatted = formatted.replace(/^=+$/gm, '<hr style="border-color: #e5e7eb; margin: 1rem 0;">');
+      
+      // Convert line breaks to HTML
+      formatted = formatted.replace(/\n/g, '<br>');
+      
+      // Wrap match info in styled divs
+      formatted = formatted.replace(
+        /(📊|📅|🏁|🏆|🇧🇷)\s*([^<]+?)<br>/g,
+        '<div class="match-info">$1 $2</div>'
+      );
+      
+      return formatted;
+    }
+
     // Generate digest now
     async function generateDigest() {
       if (!userId) {
@@ -382,40 +484,64 @@
         <div class="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm">
           <div class="flex items-center gap-3 text-neutral-700">
             <i data-lucide="loader-2" class="h-5 w-5 animate-spin"></i>
-            Generating your personalized sport digest...
+            Generating your personalized sport digest... (this may take 10-30 seconds)
           </div>
         </div>
       `;
       renderIcons();
 
       try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+        
         const resp = await fetch('/generate-digest', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: userId })
+          body: JSON.stringify({ user_id: userId }),
+          signal: controller.signal
         });
 
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        clearTimeout(timeoutId);
+
+        if (!resp.ok) {
+          const errorText = await resp.text();
+          console.error('Server error:', errorText);
+          throw new Error(`HTTP ${resp.status}: ${errorText}`);
+        }
+        
         const data = await resp.json();
         const digestContent = (data && data.digest) ? data.digest : 'No digest generated';
 
-        const content = (window.marked && window.marked.parse) ? window.marked.parse(digestContent) : `<pre class="whitespace-pre-wrap">${digestContent}</pre>`;
+        // Format digest with sport-specific sections
+        const formattedDigest = formatDigestBySport(digestContent);
+        
         results.innerHTML = `
           <div class="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm">
             <div class="mb-4 flex items-center justify-between">
-              <h3 class="text-xl font-semibold tracking-tight">Your Sport Digest</h3>
-              <div class="text-sm text-neutral-600">${new Date().toLocaleString()}</div>
+              <h3 class="text-xl font-semibold tracking-tight">Seu Digest Esportivo</h3>
+              <div class="text-sm text-neutral-600">${new Date().toLocaleString('pt-BR')}</div>
             </div>
-            <div class="prose max-w-none">${content}</div>
+            <div class="digest-content">${formattedDigest}</div>
           </div>
         `;
         renderIcons();
       } catch (err) {
+        let errorMsg = 'Failed to generate digest. Please try again.';
+        if (err.name === 'AbortError') {
+          errorMsg = 'Request timed out. The digest generation is taking longer than expected. Please try again.';
+        } else if (err.message) {
+          errorMsg = `Error: ${err.message}`;
+        }
+        
         results.innerHTML = `
           <div class="rounded-xl border border-red-200 bg-red-50 p-6 text-red-700">
             <div class="flex items-center gap-2">
               <i data-lucide="alert-triangle" class="h-5 w-5"></i>
-              <span>Failed to generate digest. Please try again.</span>
+              <div>
+                <div class="font-semibold">Failed to Generate Digest</div>
+                <p class="text-sm mt-1">${errorMsg}</p>
+                <p class="text-sm mt-2">Check the browser console (F12) for more details.</p>
+              </div>
             </div>
           </div>
         `;
